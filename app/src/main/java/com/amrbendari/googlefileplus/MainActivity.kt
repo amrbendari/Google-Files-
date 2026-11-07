@@ -73,11 +73,6 @@ private fun GoogleFilePlusApp() {
         if (dark) darkColorScheme() else lightColorScheme()
     }
     val allFilesAllowed = remember(refreshKey) { hasStorageAccess(context) }
-    val legacyPermissions = remember(refreshKey) {
-        Build.VERSION.SDK_INT >= 30 || (
-            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
-        )
-    }
     val storagePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         refreshKey++
     }
@@ -112,7 +107,7 @@ private fun GoogleFilePlusApp() {
                         when (destination) {
                             Destination.HOME, Destination.BROWSE -> FileBrowser(
                                 context = context,
-                                hasAccess = allFilesAllowed || legacyPermissions,
+                                hasAccess = allFilesAllowed,
                                 onRequestAccess = ::requestStorage,
                                 refreshKey = refreshKey,
                                 onRefresh = { refreshKey++ },
