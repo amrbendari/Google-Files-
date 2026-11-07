@@ -1,305 +1,318 @@
 package com.amrbendari.googlefileplus
 
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import java.io.File
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            GoogleFilePlusApp()
-        }
+        setContent { GoogleFilePlusApp() }
     }
 }
 
-private enum class Destination(val title: String) {
-    HOME("Home"),
-    BROWSE("Browse"),
-    SPACE("Space"),
-    TRASH("Trash"),
-    SETTINGS("Settings")
-}
-
-private enum class NavigationStyle {
-    FLOATING,
-    STANDARD
-}
+private enum class Destination { HOME, BROWSE, SPACE, TRASH, SETTINGS }
+private enum class NavigationStyle { FLOATING, STANDARD }
+private enum class ThemeChoice { SYSTEM, LIGHT, DARK }
+private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
 
 @Composable
 private fun GoogleFilePlusApp() {
-    var selected by remember { mutableStateOf(Destination.HOME) }
     val context = LocalContext.current
-    val preferences = remember {
-        context.getSharedPreferences("google_file_plus_settings", android.content.Context.MODE_PRIVATE)
+    val prefs = remember { context.getSharedPreferences("google_file_plus_settings", Context.MODE_PRIVATE) }
+    var destination by remember { mutableStateOf(Destination.HOME) }
+    var navStyle by remember { mutableStateOf(runCatching { NavigationStyle.valueOf(prefs.getString("navigation_style", "FLOATING")!!) }.getOrDefault(NavigationStyle.FLOATING)) }
+    var themeChoice by remember { mutableStateOf(runCatching { ThemeChoice.valueOf(prefs.getString("theme_choice", "SYSTEM")!!) }.getOrDefault(ThemeChoice.SYSTEM)) }
+    var language by remember { mutableStateOf(runCatching { AppLanguage.valueOf(prefs.getString("app_language", "SYSTEM")!!) }.getOrDefault(AppLanguage.SYSTEM)) }
+    var glassAlpha by remember { mutableFloatStateOf(prefs.getFloat("glass_alpha", 0.78f)) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    val dark = when (themeChoice) {
+        ThemeChoice.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
+        ThemeChoice.LIGHT -> false
+        ThemeChoice.DARK -> true
     }
-    var navigationStyle by remember {
-        mutableStateOf(
-            if (preferences.getString("navigation_style", "FLOATING") == "STANDARD") {
-                NavigationStyle.STANDARD
-            } else {
-                NavigationStyle.FLOATING
-            }
+    val isArabic = when (language) {
+        AppLanguage.ARABIC -> true
+        AppLanguage.ENGLISH -> false
+        AppLanguage.SYSTEM -> Locale.getDefault().language == "ar"
+    }
+    val colors = if (Build.VERSION.SDK_INT >= 31) {
+        if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    } else {
+        if (dark) darkColorScheme() else lightColorScheme()
+    }
+    val allFilesAllowed = remember(refreshKey) { hasStorageAccess(context) }
+    val legacyPermissions = remember(refreshKey) {
+        Build.VERSION.SDK_INT >= 30 || (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         )
     }
-    val systemDark = isSystemInDarkTheme()
-
-    val appColorScheme = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && systemDark ->
-            dynamicDarkColorScheme(context)
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-            dynamicLightColorScheme(context)
-        systemDark -> darkColorScheme()
-        else -> lightColorScheme()
+    val storagePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        refreshKey++
+    }
+    val settingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        refreshKey++
     }
 
-    MaterialTheme(colorScheme = appColorScheme) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background
-        ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 20.dp, vertical = 24.dp)
-                ) {
-                    Text(
-                        text = "Google File+",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = selected.title,
-                        style = MaterialTheme.typography.titleLarge
-                    )
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    when (selected) {
-                        Destination.HOME ->
-                            EmptyState("Your files, all in one place")
-                        Destination.BROWSE ->
-                            EmptyState("Browse storage")
-                        Destination.SPACE ->
-                            EmptyState(
-                                "Space is locked",
-                                "Unlock with your password or supported device biometrics."
-                            )
-                        Destination.TRASH ->
-                            EmptyState(
-                                "Recycle Bin",
-                                "Deleted items will appear here."
-                            )
-                        Destination.SETTINGS ->
-                            NavigationStyleSettings(
-                                selected = navigationStyle,
-                                onSelect = { style ->
-                                    navigationStyle = style
-                                    preferences.edit()
-                                        .putString("navigation_style", style.name)
-                                        .apply()
-                                }
-                            )
-                    }
-                }
-
-                AppNavigationBar(
-                    selected = selected,
-                    onSelect = { selected = it },
-                    floating = navigationStyle == NavigationStyle.FLOATING,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                )
-            }
+    fun save(key: String, value: String) { prefs.edit().putString(key, value).apply() }
+    fun requestStorage() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                Uri.parse("package:${context.packageName}"))
+            try { settingsLauncher.launch(intent) }
+            catch (_: Exception) { settingsLauncher.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+        } else {
+            storagePermissionLauncher.launch(arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ))
         }
     }
-}
 
-@Composable
-private fun EmptyState(
-    title: String,
-    subtitle: String = "This section is part of the initial app shell."
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 36.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
-private fun NavigationStyleSettings(
-    selected: NavigationStyle,
-    onSelect: (NavigationStyle) -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            text = "Navigation bar style",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(
-            text = "Choose how the app navigation appears.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        NavigationStyle.entries.forEach { style ->
-            val label = if (style == NavigationStyle.FLOATING) "Floating" else "Standard"
-            val description = if (style == NavigationStyle.FLOATING) {
-                "Rounded bar with space around it and a soft shadow."
-            } else {
-                "Full-width bar attached to the bottom edge."
-            }
-            Surface(
-                onClick = { onSelect(style) },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(label, style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            description,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+    CompositionLocalProvider(LocalLayoutDirection provides if (isArabic) androidx.compose.ui.unit.LayoutDirection.Rtl else androidx.compose.ui.unit.LayoutDirection.Ltr) {
+        MaterialTheme(colorScheme = colors) {
+            Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Box(Modifier.fillMaxSize()) {
+                    Column(Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 22.dp)) {
+                        Text("Google File+", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(6.dp))
+                        Text(label(destination, isArabic), style = MaterialTheme.typography.titleLarge)
+                        Spacer(Modifier.height(18.dp))
+                        when (destination) {
+                            Destination.HOME, Destination.BROWSE -> FileBrowser(
+                                context = context,
+                                hasAccess = allFilesAllowed || legacyPermissions,
+                                onRequestAccess = ::requestStorage,
+                                refreshKey = refreshKey,
+                                onRefresh = { refreshKey++ },
+                                arabic = isArabic
+                            )
+                            Destination.SPACE -> EmptySection(if (isArabic) "المساحة الخاصة مقفلة" else "Space is locked",
+                                if (isArabic) "ستتوفر هنا الملفات المحمية بعد إعداد التشفير." else "Protected files will appear here after encryption is implemented.")
+                            Destination.TRASH -> EmptySection(if (isArabic) "سلة المحذوفات" else "Recycle Bin",
+                                if (isArabic) "إدارة سلة المحذوفات قيد التطوير." else "Recycle Bin management is not implemented yet.")
+                            Destination.SETTINGS -> SettingsScreen(
+                                navStyle, { navStyle = it; save("navigation_style", it.name) },
+                                themeChoice, { themeChoice = it; save("theme_choice", it.name) },
+                                language, { language = it; save("app_language", it.name) },
+                                glassAlpha, { glassAlpha = it; prefs.edit().putFloat("glass_alpha", it).apply() },
+                                isArabic
+                            )
+                        }
                     }
-                    RadioButton(
-                        selected = selected == style,
-                        onClick = { onSelect(style) }
+                    AppNavigationBar(
+                        selected = destination,
+                        onSelect = { destination = it },
+                        floating = navStyle == NavigationStyle.FLOATING,
+                        glassAlpha = glassAlpha,
+                        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
+                        arabic = isArabic
                     )
                 }
             }
         }
     }
+}
+
+private fun hasStorageAccess(context: Context): Boolean =
+    if (Build.VERSION.SDK_INT >= 30) Environment.isExternalStorageManager()
+    else ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+
+@Composable
+private fun FileBrowser(
+    context: Context, hasAccess: Boolean, onRequestAccess: () -> Unit,
+    refreshKey: Int, onRefresh: () -> Unit, arabic: Boolean
+) {
+    val root = remember(refreshKey, hasAccess) {
+        if (hasAccess) runCatching { Environment.getExternalStorageDirectory().listFiles()?.toList().orEmpty()
+            .sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() }) }.getOrDefault(emptyList())
+        else emptyList()
+    }
+    if (!hasAccess) {
+        Column(Modifier.fillMaxWidth().padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Default.FolderOpen, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(12.dp))
+            Text(if (arabic) "يلزم السماح بالوصول إلى الملفات" else "Storage access is required",
+                style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(if (arabic) "اضغط للسماح للتطبيق بعرض الملفات والمجلدات." else "Allow access so Google File+ can display your files and folders.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(14.dp))
+            Button(onClick = onRequestAccess) { Text(if (arabic) "منح صلاحية الملفات" else "Grant file access") }
+            if (Build.VERSION.SDK_INT >= 30) {
+                Spacer(Modifier.height(8.dp))
+                Text(if (arabic) "سيتم فتح إعدادات الوصول إلى كل الملفات." else "Android will open the All files access settings.")
+            }
+        }
+    } else {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (arabic) "التخزين الداخلي" else "Internal storage", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+            IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, if (arabic) "تحديث" else "Refresh") }
+        }
+        if (root.isEmpty()) {
+            EmptySection(if (arabic) "لا توجد ملفات ظاهرة" else "No files found",
+                if (arabic) "قد يكون المجلد فارغًا أو تعذر قراءة محتوياته." else "The folder may be empty or Android denied access.")
+        } else {
+            LazyColumn(contentPadding = PaddingValues(bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                items(root, key = { it.absolutePath }) { file ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 9.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(if (file.isDirectory) Icons.Default.Folder else Icons.Default.InsertDriveFile,
+                            null, tint = if (file.isDirectory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(file.name, maxLines = 1, style = MaterialTheme.typography.bodyLarge)
+                            Text(if (file.isDirectory) (if (arabic) "مجلد" else "Folder") else formatSize(file.length()),
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                }
+            }
+        }
+    }
+}
+
+private fun formatSize(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+    else -> String.format(Locale.getDefault(), "%.1f MB", bytes / (1024f * 1024f))
+}
+
+@Composable
+private fun SettingsScreen(
+    nav: NavigationStyle, onNav: (NavigationStyle) -> Unit,
+    theme: ThemeChoice, onTheme: (ThemeChoice) -> Unit,
+    language: AppLanguage, onLanguage: (AppLanguage) -> Unit,
+    alpha: Float, onAlpha: (Float) -> Unit, arabic: Boolean
+) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SettingGroup(if (arabic) "مظهر التطبيق" else "App appearance") {
+            listOf(ThemeChoice.SYSTEM, ThemeChoice.LIGHT, ThemeChoice.DARK).forEach { choice ->
+                val text = when (choice) {
+                    ThemeChoice.SYSTEM -> if (arabic) "تلقائي حسب الجهاز" else "System default"
+                    ThemeChoice.LIGHT -> if (arabic) "فاتح" else "Light"
+                    ThemeChoice.DARK -> if (arabic) "داكن" else "Dark"
+                }
+                ChoiceRow(text, theme == choice) { onTheme(choice) }
+            }
+        }
+        SettingGroup(if (arabic) "لغة التطبيق" else "App language") {
+            listOf(AppLanguage.SYSTEM, AppLanguage.ARABIC, AppLanguage.ENGLISH).forEach { choice ->
+                val text = when (choice) {
+                    AppLanguage.SYSTEM -> if (arabic) "لغة الجهاز" else "System language"
+                    AppLanguage.ARABIC -> "العربية"
+                    AppLanguage.ENGLISH -> "English"
+                }
+                ChoiceRow(text, language == choice) { onLanguage(choice) }
+            }
+        }
+        SettingGroup(if (arabic) "شريط التنقل" else "Navigation bar") {
+            ChoiceRow(if (arabic) "عائم" else "Floating", nav == NavigationStyle.FLOATING) { onNav(NavigationStyle.FLOATING) }
+            ChoiceRow(if (arabic) "قياسي" else "Standard", nav == NavigationStyle.STANDARD) { onNav(NavigationStyle.STANDARD) }
+            Text(if (arabic) "شفافية Liquid Glass" else "Liquid Glass transparency", style = MaterialTheme.typography.titleSmall)
+            Text("${(alpha * 100).toInt()}%", color = MaterialTheme.colorScheme.primary)
+            Slider(value = alpha, onValueChange = onAlpha, valueRange = 0.25f..0.95f)
+            Text(if (arabic) "اسحب للتحكم في شفافية خلفية الشريط." else "Adjust the translucency of the navigation surface.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun SettingGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        content()
+    }
+}
+
+@Composable
+private fun ChoiceRow(title: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            RadioButton(selected = selected, onClick = onClick)
+        }
+    }
+}
+
+@Composable
+private fun EmptySection(title: String, subtitle: String) {
+    Column(Modifier.fillMaxWidth().padding(top = 34.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+private fun label(destination: Destination, arabic: Boolean): String = when (destination) {
+    Destination.HOME -> if (arabic) "الرئيسية" else "Home"
+    Destination.BROWSE -> if (arabic) "استعراض الملفات" else "Browse"
+    Destination.SPACE -> if (arabic) "المساحة الخاصة" else "Private Space"
+    Destination.TRASH -> if (arabic) "المحذوفات" else "Trash"
+    Destination.SETTINGS -> if (arabic) "الإعدادات" else "Settings"
 }
 
 @Composable
 private fun AppNavigationBar(
-    selected: Destination,
-    onSelect: (Destination) -> Unit,
-    floating: Boolean,
-    modifier: Modifier = Modifier
+    selected: Destination, onSelect: (Destination) -> Unit, floating: Boolean,
+    glassAlpha: Float, modifier: Modifier = Modifier, arabic: Boolean
 ) {
     val items = listOf(
-        Triple(Destination.HOME, Icons.Default.Home, "Home"),
-        Triple(Destination.BROWSE, Icons.Default.Folder, "Browse"),
-        Triple(Destination.SPACE, Icons.Default.Lock, "Space"),
-        Triple(Destination.TRASH, Icons.Default.Delete, "Trash"),
-        Triple(Destination.SETTINGS, Icons.Default.Settings, "Settings")
+        Triple(Destination.HOME, Icons.Default.Home, if (arabic) "الرئيسية" else "Home"),
+        Triple(Destination.BROWSE, Icons.Default.Folder, if (arabic) "الملفات" else "Files"),
+        Triple(Destination.SPACE, Icons.Default.Lock, if (arabic) "خاصة" else "Space"),
+        Triple(Destination.TRASH, Icons.Default.Delete, if (arabic) "المحذوفات" else "Trash"),
+        Triple(Destination.SETTINGS, Icons.Default.Settings, if (arabic) "الضبط" else "Settings")
     )
-
     Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .then(
-                if (floating) {
-                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp)
-                } else {
-                    Modifier
-                }
-            )
-            .height(76.dp),
-        shape = if (floating) RoundedCornerShape(28.dp) else RoundedCornerShape(0.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = if (floating) 5.dp else 2.dp,
-        shadowElevation = if (floating) 8.dp else 0.dp
+        modifier = modifier.fillMaxWidth().then(if (floating) Modifier.padding(start = 22.dp, end = 22.dp, bottom = 9.dp) else Modifier)
+            .height(if (floating) 62.dp else 68.dp)
+            .then(if (floating) Modifier.shadow(6.dp, RoundedCornerShape(25.dp)) else Modifier),
+        shape = if (floating) RoundedCornerShape(25.dp) else RoundedCornerShape(0.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = if (floating) glassAlpha else 1f),
+        tonalElevation = 2.dp
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 4.dp, vertical = 5.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            items.forEach { (destination, icon, label) ->
+        Row(Modifier.fillMaxSize().padding(horizontal = 1.dp, vertical = 2.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+            items.forEach { (dest, icon, title) ->
                 NavigationBarItem(
-                    selected = selected == destination,
-                    onClick = { onSelect(destination) },
-                    icon = {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = label,
-                            modifier = Modifier.size(23.dp)
-                        )
-                    },
-                    label = {
-                        Text(
-                            text = label,
-                            fontSize = 10.sp,
-                            maxLines = 1
-                        )
-                    },
+                    selected = selected == dest,
+                    onClick = { onSelect(dest) },
+                    icon = { Icon(icon, contentDescription = title, modifier = Modifier.size(19.dp)) },
+                    label = { Text(title, fontSize = 9.sp, maxLines = 1) },
                     alwaysShowLabel = true,
-                    colors = NavigationBarItemDefaults.colors(
-                        indicatorColor = MaterialTheme.colorScheme.secondaryContainer
-                    )
+                    colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.secondaryContainer)
                 )
             }
         }
