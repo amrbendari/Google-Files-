@@ -27,6 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -62,10 +63,27 @@ private enum class Destination(val title: String) {
     SETTINGS("Settings")
 }
 
+private enum class NavigationStyle {
+    FLOATING,
+    STANDARD
+}
+
 @Composable
 private fun GoogleFilePlusApp() {
     var selected by remember { mutableStateOf(Destination.HOME) }
     val context = LocalContext.current
+    val preferences = remember {
+        context.getSharedPreferences("google_file_plus_settings", android.content.Context.MODE_PRIVATE)
+    }
+    var navigationStyle by remember {
+        mutableStateOf(
+            if (preferences.getString("navigation_style", "FLOATING") == "STANDARD") {
+                NavigationStyle.STANDARD
+            } else {
+                NavigationStyle.FLOATING
+            }
+        )
+    }
     val systemDark = isSystemInDarkTheme()
 
     val appColorScheme = when {
@@ -116,20 +134,25 @@ private fun GoogleFilePlusApp() {
                                 "Deleted items will appear here."
                             )
                         Destination.SETTINGS ->
-                            EmptyState(
-                                "Settings",
-                                "Appearance, language, security, and file management options."
+                            NavigationStyleSettings(
+                                selected = navigationStyle,
+                                onSelect = { style ->
+                                    navigationStyle = style
+                                    preferences.edit()
+                                        .putString("navigation_style", style.name)
+                                        .apply()
+                                }
                             )
                     }
                 }
 
-                FloatingNavigationBar(
+                AppNavigationBar(
                     selected = selected,
                     onSelect = { selected = it },
+                    floating = navigationStyle == NavigationStyle.FLOATING,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
-                        .padding(start = 16.dp, end = 16.dp, bottom = 10.dp)
                 )
             }
         }
@@ -162,9 +185,66 @@ private fun EmptyState(
 }
 
 @Composable
-private fun FloatingNavigationBar(
+private fun NavigationStyleSettings(
+    selected: NavigationStyle,
+    onSelect: (NavigationStyle) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "Navigation bar style",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            text = "Choose how the app navigation appears.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        NavigationStyle.entries.forEach { style ->
+            val label = if (style == NavigationStyle.FLOATING) "Floating" else "Standard"
+            val description = if (style == NavigationStyle.FLOATING) {
+                "Rounded bar with space around it and a soft shadow."
+            } else {
+                "Full-width bar attached to the bottom edge."
+            }
+            Surface(
+                onClick = { onSelect(style) },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(label, style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    RadioButton(
+                        selected = selected == style,
+                        onClick = { onSelect(style) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppNavigationBar(
     selected: Destination,
     onSelect: (Destination) -> Unit,
+    floating: Boolean,
     modifier: Modifier = Modifier
 ) {
     val items = listOf(
@@ -178,11 +258,18 @@ private fun FloatingNavigationBar(
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            .then(
+                if (floating) {
+                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp)
+                } else {
+                    Modifier
+                }
+            )
             .height(76.dp),
-        shape = RoundedCornerShape(28.dp),
+        shape = if (floating) RoundedCornerShape(28.dp) else RoundedCornerShape(0.dp),
         color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 5.dp,
-        shadowElevation = 8.dp
+        tonalElevation = if (floating) 5.dp else 2.dp,
+        shadowElevation = if (floating) 8.dp else 0.dp
     ) {
         Row(
             modifier = Modifier
