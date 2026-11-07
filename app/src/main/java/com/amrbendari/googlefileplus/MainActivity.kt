@@ -15,6 +15,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -149,8 +150,10 @@ private fun FileBrowser(
     context: Context, hasAccess: Boolean, onRequestAccess: () -> Unit,
     refreshKey: Int, onRefresh: () -> Unit, arabic: Boolean
 ) {
-    val root = remember(refreshKey, hasAccess) {
-        if (hasAccess) runCatching { Environment.getExternalStorageDirectory().listFiles()?.toList().orEmpty()
+    var currentDirectory by remember { mutableStateOf(Environment.getExternalStorageDirectory()) }
+    val rootDirectory = remember { Environment.getExternalStorageDirectory() }
+    val root = remember(refreshKey, hasAccess, currentDirectory) {
+        if (hasAccess) runCatching { currentDirectory.listFiles()?.toList().orEmpty()
             .sortedWith(compareBy<File> { !it.isDirectory }.thenBy { it.name.lowercase() }) }.getOrDefault(emptyList())
         else emptyList()
     }
@@ -172,7 +175,13 @@ private fun FileBrowser(
         }
     } else {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(if (arabic) "التخزين الداخلي" else "Internal storage", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+            if (currentDirectory != rootDirectory) {
+                IconButton(onClick = { currentDirectory = currentDirectory.parentFile ?: rootDirectory }) {
+                    Icon(Icons.Default.ArrowBack, if (arabic) "للخلف" else "Up")
+                }
+            }
+            Text(currentDirectory.name.ifBlank { if (arabic) "التخزين الداخلي" else "Internal storage" },
+                Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 1)
             IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, if (arabic) "تحديث" else "Refresh") }
         }
         if (root.isEmpty()) {
@@ -181,7 +190,8 @@ private fun FileBrowser(
         } else {
             LazyColumn(contentPadding = PaddingValues(bottom = 104.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 items(root, key = { it.absolutePath }) { file ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 9.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().clickable(enabled = file.isDirectory) { currentDirectory = file }
+                        .padding(vertical = 9.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(if (file.isDirectory) Icons.Default.Folder else Icons.Default.InsertDriveFile,
                             null, tint = if (file.isDirectory) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(12.dp))
