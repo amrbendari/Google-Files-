@@ -30,6 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -46,6 +48,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import java.util.concurrent.TimeUnit
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -143,12 +146,15 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
     var picker by remember{mutableStateOf(false)}
     var details by remember{mutableStateOf<File?>(null)}
     var message by remember{mutableStateOf<String?>(null)}
+    val folderFocus=remember{FocusRequester()}
+    val keyboard=LocalSoftwareKeyboardController.current
+    LaunchedEffect(folderDialog){if(folderDialog){folderFocus.requestFocus();keyboard?.show()}}
     LaunchedEffect(home){if(!home&&current==null)current=internal}
     BackHandler(enabled=current!=null||collection!=null||selected.isNotEmpty()||searchOpen){
         when{selected.isNotEmpty()->selected=emptySet();searchOpen->{searchOpen=false;query=""};collection!=null->collection=null;else->current=current?.parentFile}
     }
     val files=remember(refresh,current,access,collection,sort,query){
-        val all=if(!access) emptyList() else if(collection!=null)queryMediaFiles(context,collection!!) else current?.let{runCatching{it.listFiles()?.toList().orEmpty()}.getOrDefault(emptyList())}.orEmpty()
+        val all=if(!access) emptyList() else if(searchOpen&&query.isNotBlank()&&collection==null)searchAllFiles(context,query) else if(collection!=null)queryMediaFiles(context,collection!!) else current?.let{runCatching{it.listFiles()?.toList().orEmpty()}.getOrDefault(emptyList())}.orEmpty()
         val filtered=all.filter{it.name.contains(query,true)}
         when(sort){"newest"->filtered.sortedByDescending{it.lastModified()};"oldest"->filtered.sortedBy{it.lastModified()};"largest"->filtered.sortedByDescending{if(it.isFile)it.length() else 0L};else->filtered.sortedBy{it.name.lowercase(Locale.ROOT)}}
     }
@@ -249,7 +255,7 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
         AlertDialog(onDismissRequest={pending=null;selected=emptySet()},title={Text(if(arabic)"إعادة تسمية" else "Rename")},text={OutlinedTextField(newName,{newName=it},singleLine=true)},confirmButton={TextButton(onClick={val f=selected.first();val ok=newName.isNotBlank()&&f.renameTo(File(f.parentFile,newName.trim()));pending=null;selected=emptySet();onRefresh();if(!ok)message="Rename failed"}){Text(if(arabic)"حفظ" else "Save")}},dismissButton={TextButton(onClick={pending=null;selected=emptySet()}){Text("Cancel")}})
     }
     if(pending=="Delete"&&selected.isNotEmpty())AlertDialog(onDismissRequest={pending=null;selected=emptySet()},title={Text(if(arabic)"حذف العناصر" else "Delete items")},text={Text(if(arabic)"نقل ${selected.size} عنصر إلى سلة المحذوفات؟" else "Move ${selected.size} item(s) to Trash?")},confirmButton={TextButton(onClick={val errors=selected.toList().mapNotNull{f->runCatching{moveToTrash(context,f)}.exceptionOrNull()?.message};pending=null;selected=emptySet();onRefresh();if(errors.isNotEmpty())message=errors.joinToString("\n")}){Text(if(arabic)"تأكيد" else "Confirm")}},dismissButton={TextButton(onClick={pending=null;selected=emptySet()}){Text("Cancel")}})
-    if(folderDialog)AlertDialog(onDismissRequest={folderDialog=false},title={Text(if(arabic)"مجلد جديد" else "New Folder")},text={OutlinedTextField(folderName,{folderName=it},singleLine=true,placeholder={Text(if(arabic)"اسم المجلد" else "Folder name")})},confirmButton={TextButton(onClick={create}){Text(if(arabic)"إنشاء" else "Create")}},dismissButton={TextButton(onClick={folderDialog=false}){Text("Cancel")}})
+    if(folderDialog)AlertDialog(onDismissRequest={folderDialog=false},title={Text(if(arabic)"مجلد جديد" else "New Folder")},text={OutlinedTextField(folderName,{folderName=it},modifier=Modifier.focusRequester(folderFocus),singleLine=true,placeholder={Text(if(arabic)"اسم المجلد" else "Folder name")})},confirmButton={TextButton(onClick={create}){Text(if(arabic)"إنشاء" else "Create")}},dismissButton={TextButton(onClick={folderDialog=false}){Text("Cancel")}})
     if(picker)DestinationPickerDialog(arabic,internal,external,{picker=false;pending=null;selected=emptySet()},{finishCopyMove(it)})
     details?.let{f->val date=SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.getDefault()).format(Date(f.lastModified()))
         AlertDialog(onDismissRequest={details=null},title={Text(if(arabic)"بيانات الملف" else "File details")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
@@ -332,6 +338,16 @@ private val AUDIO_EXTENSIONS=setOf("mp3","m4a","aac","flac","ogg","wav","wma","o
 private fun isVideo(f:File)=f.extension.lowercase(Locale.ROOT) in VIDEO_EXTENSIONS
 private fun isAudio(f:File)=f.extension.lowercase(Locale.ROOT) in AUDIO_EXTENSIONS
 private fun isMedia(f:File)=isVideo(f)||isAudio(f)
+private fun searchAllFiles(context:Context,query:String):List<File>{
+    val result=mutableListOf<File>()
+    runCatching{
+        context.contentResolver.query(MediaStore.Files.getContentUri("external"),arrayOf(MediaStore.MediaColumns.DATA),MediaStore.MediaColumns.DISPLAY_NAME+" LIKE ?",arrayOf("%"+query+"%"),MediaStore.MediaColumns.DATE_MODIFIED+" DESC")?.use{cursor->
+            val index=cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+            if(index>=0)while(cursor.moveToNext()){val path=cursor.getString(index);if(!path.isNullOrBlank()){val f=File(path);if(f.exists())result.add(f)}}
+        }
+    }
+    return result.distinctBy{it.absolutePath}
+}
 private fun queryMediaFiles(context:Context,kind:String):List<File>{
     if(kind=="downloads")return File(Environment.getExternalStorageDirectory(),Environment.DIRECTORY_DOWNLOADS).listFiles()?.toList().orEmpty()
     val uri=when(kind){"videos"->MediaStore.Video.Media.EXTERNAL_CONTENT_URI;"audio"->MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;"images"->MediaStore.Images.Media.EXTERNAL_CONTENT_URI;else->return emptyList()}
