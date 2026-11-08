@@ -5,6 +5,15 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.ThumbnailUtils
+import android.util.Size
+import android.widget.ImageView
+import android.graphics.drawable.Drawable
+import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -98,6 +107,8 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
     var showIntro by remember { mutableStateOf(true) }
     var theme by remember { mutableStateOf(enumPref(prefs.getString("theme_choice","SYSTEM"), ThemeChoice.SYSTEM)) }
     var language by remember { mutableStateOf(enumPref(prefs.getString("app_language","SYSTEM"), AppLanguage.SYSTEM)) }
+    var navbarTransparency by remember { mutableFloatStateOf(prefs.getFloat("navbar_transparency", 0.15f)) }
+    var sidebarTransparency by remember { mutableFloatStateOf(prefs.getFloat("sidebar_transparency", 0.65f)) }
     var lastBack by remember { mutableLongStateOf(0L) }
     var refresh by remember { mutableIntStateOf(0) }
     val unlocked = remember { mutableStateOf(false) }
@@ -120,12 +131,12 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
                 Text(destLabel(destination,arabic),style=MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(12.dp))
                 when(destination){
-                    Destination.HOME,Destination.BROWSE->FileBrowser(context,access,::requestAccess,refresh,{refresh++},arabic,destination==Destination.HOME)
+                    Destination.HOME,Destination.BROWSE->FileBrowser(context,access,::requestAccess,refresh,{refresh++},arabic,destination==Destination.HOME,sidebarTransparency)
                     Destination.TRASH->TrashScreen(context,refresh,{refresh++},arabic)
-                    Destination.SETTINGS->SettingsScreen(theme,{theme=it;prefs.edit().putString("theme_choice",it.name).apply()},language,{language=it;prefs.edit().putString("app_language",it.name).apply()},arabic)
+                    Destination.SETTINGS->SettingsScreen(theme,{theme=it;prefs.edit().putString("theme_choice",it.name).apply()},language,{language=it;prefs.edit().putString("app_language",it.name).apply()},navbarTransparency,{navbarTransparency=it;prefs.edit().putFloat("navbar_transparency",it).apply()},sidebarTransparency,{sidebarTransparency=it;prefs.edit().putFloat("sidebar_transparency",it).apply()},arabic)
                 }
             }
-            AppNavigationBar(destination,{if(it==Destination.HOME)backStack.clear() else if(destination!=it)backStack.add(destination);destination=it},Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),arabic)
+            AppNavigationBar(destination,{if(it==Destination.HOME)backStack.clear() else if(destination!=it)backStack.add(destination);destination=it},Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),arabic,navbarTransparency)
             if(showIntro) GoogleFilePlusIntro()
         }}}
     }
@@ -157,7 +168,7 @@ private fun openFile(context:Context,file:File){val uri=FileProvider.getUriForFi
 private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf";"jpg","jpeg"->"image/jpeg";"png"->"image/png";"mp4"->"video/mp4";"mp3"->"audio/mpeg";"txt"->"text/plain";"zip"->"application/zip";else->"*/*"}
 
 @OptIn(ExperimentalFoundationApi::class)
-@Composable private fun FileBrowser(context:Context,access:Boolean,request:()->Unit,refresh:Int,onRefresh:()->Unit,arabic:Boolean,home:Boolean){
+@Composable private fun FileBrowser(context:Context,access:Boolean,request:()->Unit,refresh:Int,onRefresh:()->Unit,arabic:Boolean,home:Boolean,sidebarTransparency:Float){
     val internal=remember{Environment.getExternalStorageDirectory()}
     val external=remember{context.getExternalFilesDirs(null).getOrNull(1)?.let{var f:File?=it;repeat(4){f=f?.parentFile};f}?.takeIf{it.exists()}}
     var current by remember{mutableStateOf<File?>(null)}
@@ -236,7 +247,7 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
         }
     }else{
         Row(Modifier.fillMaxSize(),verticalAlignment=Alignment.Top){
-            Column(Modifier.width(132.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.35f)).padding(horizontal=5.dp, vertical=8.dp),verticalArrangement=Arrangement.spacedBy(7.dp)){
+            Column(Modifier.width(132.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=1f-sidebarTransparency)).padding(horizontal=5.dp, vertical=8.dp),verticalArrangement=Arrangement.spacedBy(7.dp)){
                 Text(if(arabic)"المواقع" else "Locations",style=MaterialTheme.typography.labelMedium,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=7.dp, vertical=4.dp))
                 val quickPlaces=listOf(Triple("Root",File("/"),Icons.Default.AdminPanelSettings),Triple(if(arabic)"الذاكرة الداخلية" else "Internal",internal,Icons.Default.PhoneAndroid)) + listOfNotNull(external?.let{Triple(if(arabic)"الذاكرة الخارجية" else "External",it,Icons.Default.SdCard)})
                 quickPlaces.forEachIndexed{index,item->
@@ -279,7 +290,7 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
                     val fade by androidx.compose.animation.core.animateFloatAsState(if(key in deletingFiles)0f else 1f,animationSpec=tween(260),label="delete_fade")
                     Card(Modifier.fillMaxWidth().graphicsLayer{alpha=fade}.animateContentSize().combinedClickable(onClick={open(f)},onLongClick={if(selected.isEmpty())menuFile=f else toggle(f)}),colors=CardDefaults.cardColors(containerColor=targetColor)){
                     Column(Modifier.padding(8.dp),horizontalAlignment=Alignment.CenterHorizontally){
-                        Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.TopEnd){Icon(fileIcon(f),null,Modifier.padding(top=10.dp).size(48.dp),tint=MaterialTheme.colorScheme.primary);Checkbox(f in selected,{toggle(f)},modifier=Modifier.size(28.dp))}
+                        Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.TopEnd){FileThumbnail(f,Modifier.fillMaxWidth().height(82.dp));Checkbox(f in selected,{toggle(f)},modifier=Modifier.size(28.dp))}
                         Text(f.name,maxLines=2,minLines=2,style=MaterialTheme.typography.bodySmall)
                         Text(if(f.isDirectory)"Folder" else fmt(f.length()),style=MaterialTheme.typography.labelSmall)
                         TextButton(onClick={details=f},contentPadding=PaddingValues(0.dp)){Text(if(arabic)"التفاصيل" else "Details")}
@@ -293,7 +304,7 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
                     val targetColor by animateColorAsState(if(key in recentFiles)MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surface, label="file_transfer_highlight")
                     val fade by androidx.compose.animation.core.animateFloatAsState(if(key in deletingFiles)0f else 1f,animationSpec=tween(260),label="delete_fade")
                     Row(Modifier.fillMaxWidth().graphicsLayer{alpha=fade}.background(targetColor,RoundedCornerShape(10.dp)).animateContentSize().combinedClickable(onClick={open(f)},onLongClick={if(selected.isEmpty())menuFile=f else toggle(f)}).padding(vertical=7.dp,horizontal=5.dp),verticalAlignment=Alignment.CenterVertically){
-                    Icon(fileIcon(f),null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(10.dp));Column(Modifier.weight(1f)){Text(f.name,maxLines=1);Text(if(f.isDirectory)"Folder" else fmt(f.length()),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+                    FileThumbnail(f,Modifier.size(52.dp));Spacer(Modifier.width(10.dp));Column(Modifier.weight(1f)){Text(f.name,maxLines=1);Text(if(f.isDirectory)"Folder" else fmt(f.length()),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
                     Checkbox(f in selected,{toggle(f)});IconButton(onClick={details=f}){Icon(Icons.Default.Info,if(arabic)"التفاصيل" else "Details")};IconButton(onClick={menuFile=f}){Icon(Icons.Default.MoreVert,null)}
                 };HorizontalDivider()}
             }
@@ -326,6 +337,35 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
     playing?.let{PlayerDialog(it){playing=null}}
     message?.let{AlertDialog(onDismissRequest={message=null},text={Text(it)},confirmButton={TextButton(onClick={message=null}){Text("OK")}})}
 }
+@Composable private fun FileThumbnail(file:File,modifier:Modifier=Modifier){
+    val context=LocalContext.current
+    val content by produceState<Any?>(initialValue=null,key1=file.absolutePath,key2=file.lastModified()){
+        value=withContext(Dispatchers.IO){
+            runCatching{
+                when{
+                    file.isDirectory->null
+                    file.extension.equals("apk",true)->context.packageManager.getPackageArchiveInfo(file.absolutePath,0)?.applicationInfo?.let{info->info.sourceDir=file.absolutePath;info.publicSourceDir=file.absolutePath;info.loadIcon(context.packageManager)}
+                    isVideo(file)&&Build.VERSION.SDK_INT>=29->ThumbnailUtils.createVideoThumbnail(file,Size(256,256),null)
+                    isVideo(file)->@Suppress("DEPRECATION") ThumbnailUtils.createVideoThumbnail(file.absolutePath,android.provider.MediaStore.Images.Thumbnails.MINI_KIND)
+                    file.extension.lowercase(Locale.ROOT) in setOf("jpg","jpeg","png","webp","bmp","gif","heic")->{
+                        val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true};BitmapFactory.decodeFile(file.absolutePath,bounds)
+                        val opts=BitmapFactory.Options().apply{inSampleSize=maxOf(1,minOf(bounds.outWidth/256,bounds.outHeight/256)).coerceAtLeast(1)}
+                        BitmapFactory.decodeFile(file.absolutePath,opts)
+                    }
+                    else->null
+                }
+            }.getOrNull()
+        }
+    }
+    Surface(modifier,shape=RoundedCornerShape(10.dp),color=MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.45f)){
+        when(val item=content){
+            is Bitmap->AndroidView(factory={ImageView(it).apply{scaleType=ImageView.ScaleType.CENTER_CROP}},update={it.setImageBitmap(item)},modifier=Modifier.fillMaxSize())
+            is Drawable->AndroidView(factory={ImageView(it).apply{scaleType=ImageView.ScaleType.FIT_CENTER}},update={it.setImageDrawable(item)},modifier=Modifier.fillMaxSize())
+            else->Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){Icon(if(file.isDirectory)Icons.Default.Folder else fileIcon(file),null,Modifier.size(32.dp),tint=MaterialTheme.colorScheme.primary)}
+        }
+    }
+}
+
 @Composable private fun DetailLine(label:String,value:String){Column{Text(label,style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary);Text(value,style=MaterialTheme.typography.bodyMedium)}}
 private fun fileIcon(f:File)=when{f.isDirectory->Icons.Default.Folder;isVideo(f)->Icons.Default.VideoFile;isAudio(f)->Icons.Default.AudioFile;f.extension.lowercase() in setOf("jpg","jpeg","png","gif","webp","bmp","heic")->Icons.Default.Image;else->Icons.Default.InsertDriveFile}
 
@@ -387,18 +427,38 @@ class TrashCleanupWorker(context:Context,params:WorkerParameters):CoroutineWorke
 }
 
 @Composable private fun TrashScreen(context:Context,refresh:Int,onRefresh:()->Unit,arabic:Boolean){
-    val prefs=trashPrefs(context);val entries=remember(refresh){prefs.all.mapNotNull{(id,v)->val p=(v as? String)?.split("|",limit=3)?:return@mapNotNull null;if(p.size<3)null else Triple(id,p[0],File(trashDir(context),p[2]))}}
+    val prefs=trashPrefs(context)
+    val entries=remember(refresh){prefs.all.mapNotNull{(id,v)->val p=(v as? String)?.split("|",limit=3)?:return@mapNotNull null;if(p.size<3)null else Triple(id,p[0],File(trashDir(context),p[2]))}}
+    var selected by remember{mutableStateOf(setOf<String>())}
+    var confirmDeleteAll by remember{mutableStateOf(false)}
+    val allIds=entries.map{it.first}.toSet()
     Column(Modifier.fillMaxSize().padding(bottom=100.dp)){
         Text(if(arabic)"تُحذف العناصر تلقائيًا بعد 90 يومًا" else "Items are automatically deleted after 90 days",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        if(entries.isNotEmpty()){
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(2.dp),verticalAlignment=Alignment.CenterVertically){
+                TextButton(onClick={selected=if(selected.size==entries.size)emptySet() else allIds}){Icon(Icons.Default.SelectAll,null);Text(if(selected.size==entries.size)if(arabic)"إلغاء التحديد" else "Deselect" else if(arabic)"تحديد الكل" else "Select all")}
+                TextButton(onClick={confirmDeleteAll=true}){Icon(Icons.Default.DeleteForever,null);Text(if(arabic)"حذف الكل" else "Delete all")}
+                TextButton(onClick={
+                    val failed=mutableListOf<String>()
+                    entries.filter{selected.isEmpty()||it.first in selected}.forEach{(id,original,file)->
+                        runCatching{val dest=File(original);dest.parentFile?.mkdirs();copyRec(file,dest);file.deleteRecursively();prefs.edit().remove(id).apply()}.onFailure{failed.add(file.name)}
+                    }
+                    selected=emptySet();onRefresh()
+                    if(failed.isNotEmpty())android.widget.Toast.makeText(context,if(arabic)"تعذر استعادة: "+failed.joinToString() else "Could not restore: "+failed.joinToString(),android.widget.Toast.LENGTH_LONG).show()
+                }){Icon(Icons.Default.Restore,null);Text(if(arabic)"استعادة الكل" else "Restore all")}
+            }
+        }
         if(entries.isEmpty())Text(if(arabic)"سلة المحذوفات فارغة" else "Trash is empty",Modifier.padding(20.dp))
         LazyColumn { items(entries,key={it.first}){(id,original,file)->
             Row(Modifier.fillMaxWidth().padding(vertical=8.dp),verticalAlignment=Alignment.CenterVertically){
-                Icon(Icons.Default.Delete,null);Column(Modifier.weight(1f).padding(horizontal=10.dp)){Text(file.name,maxLines=1);Text(original,maxLines=1,style=MaterialTheme.typography.bodySmall)}
-                IconButton(onClick={runCatching{val dest=File(original);dest.parentFile?.mkdirs();copyRec(file,dest);file.deleteRecursively();prefs.edit().remove(id).apply();onRefresh()}}){Icon(Icons.Default.Restore,null)}
-                IconButton(onClick={file.deleteRecursively();prefs.edit().remove(id).apply();onRefresh()}){Icon(Icons.Default.DeleteForever,null)}
+                Checkbox(checked=id in selected,onCheckedChange={selected=if(it)selected+id else selected-id})
+                Icon(Icons.Default.Delete,null);Column(Modifier.weight(1f).padding(horizontal=8.dp)){Text(file.name,maxLines=1);Text(original,maxLines=1,style=MaterialTheme.typography.bodySmall)}
+                IconButton(onClick={runCatching{val dest=File(original);dest.parentFile?.mkdirs();copyRec(file,dest);file.deleteRecursively();prefs.edit().remove(id).apply();selected=selected-id;onRefresh}}){Icon(Icons.Default.Restore,null)}
+                IconButton(onClick={file.deleteRecursively();prefs.edit().remove(id).apply();selected=selected-id;onRefresh()}){Icon(Icons.Default.DeleteForever,null)}
             };HorizontalDivider()
         }}
     }
+    if(confirmDeleteAll)AlertDialog(onDismissRequest={confirmDeleteAll=false},title={Text(if(arabic)"حذف كل العناصر نهائيًا؟" else "Permanently delete all items?")},text={Text(if(arabic)"لا يمكن التراجع عن هذا الإجراء." else "This action cannot be undone.")},confirmButton={TextButton(onClick={entries.forEach{(id,_,file)->file.deleteRecursively();prefs.edit().remove(id).apply()};selected=emptySet();confirmDeleteAll=false;onRefresh()}){Text(if(arabic)"حذف الكل" else "Delete all")}},dismissButton={TextButton(onClick={confirmDeleteAll=false}){Text(if(arabic)"إلغاء" else "Cancel")}})
 }
 
 
@@ -438,17 +498,24 @@ private fun queryMediaFiles(context:Context,kind:String):List<File>{
     }
 }
 
-@Composable private fun SettingsScreen(theme:ThemeChoice,onTheme:(ThemeChoice)->Unit,language:AppLanguage,onLanguage:(AppLanguage)->Unit,arabic:Boolean){
+@Composable private fun SettingsScreen(theme:ThemeChoice,onTheme:(ThemeChoice)->Unit,language:AppLanguage,onLanguage:(AppLanguage)->Unit,navbarTransparency:Float,onNavbarTransparency:(Float)->Unit,sidebarTransparency:Float,onSidebarTransparency:(Float)->Unit,arabic:Boolean){
     Column(Modifier.fillMaxWidth().padding(bottom=110.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
         Text(if(arabic)"المظهر" else "Appearance",fontWeight=FontWeight.Bold)
         listOf(ThemeChoice.SYSTEM,ThemeChoice.LIGHT,ThemeChoice.DARK).forEach{Choice(if(arabic)when(it){ThemeChoice.SYSTEM->"حسب الجهاز";ThemeChoice.LIGHT->"فاتح";else->"داكن"}else when(it){ThemeChoice.SYSTEM->"System";ThemeChoice.LIGHT->"Light";else->"Dark"},theme==it){onTheme(it)}}
+        Text(if(arabic)"الشفافية" else "Transparency",fontWeight=FontWeight.Bold)
+        Text(if(arabic)"شفافية شريط التنقل" else "Navbar transparency")
+        Slider(value=navbarTransparency,onValueChange=onNavbarTransparency,valueRange=0f..0.9f)
+        Text("${(navbarTransparency*100).toInt()}%")
+        Text(if(arabic)"شفافية العمود الجانبي" else "Sidebar transparency")
+        Slider(value=sidebarTransparency,onValueChange=onSidebarTransparency,valueRange=0f..0.9f)
+        Text("${(sidebarTransparency*100).toInt()}%")
         Text(if(arabic)"اللغة" else "Language",fontWeight=FontWeight.Bold);listOf(AppLanguage.SYSTEM,AppLanguage.ARABIC,AppLanguage.ENGLISH).forEach{Choice(when(it){AppLanguage.SYSTEM->if(arabic)"لغة الجهاز" else "System";AppLanguage.ARABIC->"العربية";else->"English"},language==it){onLanguage(it)}}
     }
 }
 @Composable private fun Choice(label:String,selected:Boolean,onClick:()->Unit){Surface(onClick=onClick,shape=RoundedCornerShape(10.dp),color=MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.35f)){Row(Modifier.fillMaxWidth().padding(8.dp),verticalAlignment=Alignment.CenterVertically){Text(label,Modifier.weight(1f));RadioButton(selected,onClick)}}}
-@Composable private fun AppNavigationBar(selected:Destination,onSelect:(Destination)->Unit,modifier:Modifier,arabic:Boolean){
+@Composable private fun AppNavigationBar(selected:Destination,onSelect:(Destination)->Unit,modifier:Modifier,arabic:Boolean,transparency:Float){
     val items=listOf(Triple(Destination.HOME,Icons.Default.Home,if(arabic)"الرئيسية" else "Home"),Triple(Destination.TRASH,Icons.Default.Delete,if(arabic)"المحذوفات" else "Trash"),Triple(Destination.SETTINGS,Icons.Default.Settings,if(arabic)"الإعدادات" else "Settings"))
-    NavigationBar(modifier.fillMaxWidth().height(64.dp),containerColor=MaterialTheme.colorScheme.surface){
+    NavigationBar(modifier.fillMaxWidth().height(64.dp),containerColor=MaterialTheme.colorScheme.surface.copy(alpha=1f-transparency)){
         items.forEach{(d,ic,label)->NavigationBarItem(selected==d,{onSelect(d)},{Icon(ic,label,Modifier.size(19.dp))},label={Text(label,fontSize=9.sp,maxLines=1)},alwaysShowLabel=true)}
     }
 }
