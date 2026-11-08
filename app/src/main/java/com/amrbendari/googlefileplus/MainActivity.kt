@@ -26,6 +26,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.blur
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -59,13 +61,13 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
     var theme by remember { mutableStateOf(enumPref(prefs.getString("theme_choice","SYSTEM"), ThemeChoice.SYSTEM)) }
     var language by remember { mutableStateOf(enumPref(prefs.getString("app_language","SYSTEM"), AppLanguage.SYSTEM)) }
     var alpha by remember { mutableFloatStateOf(prefs.getFloat("glass_alpha",.78f)) }
-    var spacing by remember { mutableFloatStateOf(prefs.getFloat("nav_spacing",8f)) }
+    var spacing by remember { mutableFloatStateOf(prefs.getFloat("nav_spacing",8f)) }\n    var navBlur by remember { mutableFloatStateOf(prefs.getFloat("nav_blur",0f)) }\n    var navWidth by remember { mutableFloatStateOf(prefs.getFloat("nav_width",92f)) }\n    var lastBack by remember { mutableLongStateOf(0L) }
     var refresh by remember { mutableIntStateOf(0) }
     val unlocked = remember { mutableStateOf(false) }
     val dark = when(theme){ThemeChoice.SYSTEM->androidx.compose.foundation.isSystemInDarkTheme();ThemeChoice.LIGHT->false;ThemeChoice.DARK->true}
     val arabic = when(language){AppLanguage.ARABIC->true;AppLanguage.ENGLISH->false;AppLanguage.SYSTEM->Locale.getDefault().language=="ar"}
     val scheme = if(Build.VERSION.SDK_INT>=31){if(dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)}else{if(dark) darkColorScheme() else lightColorScheme()}
-    val access = remember(refresh) { if(Build.VERSION.SDK_INT>=30) Environment.isExternalStorageManager() else ContextCompat.checkSelfPermission(context,Manifest.permission.READ_EXTERNAL_STORAGE)==PackageManager.PERMISSION_GRANTED }
+    BackHandler {\n        if (destination != Destination.HOME) { if(destination==Destination.SPACE) unlocked.value=false; destination=Destination.HOME }\n        else { val now=System.currentTimeMillis(); if(now-lastBack<1800L) (context as? ComponentActivity)?.finish() else { lastBack=now; android.widget.Toast.makeText(context,if(arabic) "اضغط رجوع مرة أخرى للخروج" else "Press back again to exit",android.widget.Toast.LENGTH_SHORT).show() } }\n    }\n    LaunchedEffect(Unit) { cleanupTrash(context) }\n    val access = remember(refresh) { if(Build.VERSION.SDK_INT>=30) Environment.isExternalStorageManager() else ContextCompat.checkSelfPermission(context,Manifest.permission.READ_EXTERNAL_STORAGE)==PackageManager.PERMISSION_GRANTED }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){refresh++}
     val settings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()){refresh++}
     fun requestAccess(){ if(Build.VERSION.SDK_INT>=30){val i=Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,Uri.parse("package:${context.packageName}"));try{settings.launch(i)}catch(_:Exception){settings.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))}}else permission.launch(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE,Manifest.permission.WRITE_EXTERNAL_STORAGE)) }
@@ -78,11 +80,11 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
                 when(destination){
                     Destination.HOME,Destination.BROWSE->FileBrowser(context,access,::requestAccess,refresh,{refresh++},arabic,destination==Destination.HOME)
                     Destination.SPACE->SpaceScreen(context,prefs,unlocked.value,{unlocked.value=it},{refresh++},arabic)
-                    Destination.TRASH->Text(if(arabic)"سلة المحذوفات: ستضاف في تحديث لاحق." else "Recycle Bin is planned for a later update.")
-                    Destination.SETTINGS->SettingsScreen(navStyle,{navStyle=it;prefs.edit().putString("navigation_style",it.name).apply()},theme,{theme=it;prefs.edit().putString("theme_choice",it.name).apply()},language,{language=it;prefs.edit().putString("app_language",it.name).apply()},alpha,{alpha=it;prefs.edit().putFloat("glass_alpha",it).apply()},spacing,{spacing=it;prefs.edit().putFloat("nav_spacing",it).apply()},arabic)
+                    Destination.TRASH->TrashScreen(context,refresh,{refresh++},arabic)
+                    Destination.SETTINGS->SettingsScreen(navStyle,{navStyle=it;prefs.edit().putString("navigation_style",it.name).apply()},theme,{theme=it;prefs.edit().putString("theme_choice",it.name).apply()},language,{language=it;prefs.edit().putString("app_language",it.name).apply()},alpha,{alpha=it;prefs.edit().putFloat("glass_alpha",it).apply()},spacing,{spacing=it;prefs.edit().putFloat("nav_spacing",it).apply()},navBlur,{navBlur=it;prefs.edit().putFloat("nav_blur",it).apply()},navWidth,{navWidth=it;prefs.edit().putFloat("nav_width",it).apply()},arabic)
                 }
             }
-            AppNavigationBar(destination,{if(destination==Destination.SPACE)unlocked.value=false;destination=it},navStyle==NavigationStyle.FLOATING,alpha,spacing,Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),arabic)
+            AppNavigationBar(destination,{if(destination==Destination.SPACE)unlocked.value=false;destination=it},navStyle==NavigationStyle.FLOATING,alpha,spacing,navBlur,navWidth,Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),arabic)
         }}}
     }
 }
@@ -108,7 +110,7 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
     fun done(){selected=null;action=null;input="";onRefresh()}
     fun perform(a:String,f:File){
         try{when(a){
-            "Delete","حذف"->{if(f.deleteRecursively())message=if(arabic)"تم الحذف" else "Deleted" else message="Delete failed"}
+            "Delete","حذف"->{moveToTrash(context,f);message=if(arabic)"تم نقل الملف إلى سلة المحذوفات" else "Moved to Trash"}
             "Permanent delete","حذف نهائي"->{f.deleteRecursively()}
             "Rename","إعادة تسمية"->{val target=File(f.parentFile,input.trim());if(input.isNotBlank()&&f.renameTo(target)){}else throw Exception("Rename failed")}
             "Copy","نسخ","Move","نقل"->{val target=File(input.trim());if(input.isBlank())throw Exception("Enter destination path");copyRec(f,File(target,f.name));if(a=="Move"||a=="نقل")f.deleteRecursively()}
@@ -132,7 +134,38 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
     message?.let{AlertDialog(onDismissRequest={message=null},text={Text(it)},confirmButton={TextButton(onClick={message=null}){Text("OK")}})}
 }
 
-@Composable private fun SpaceScreen(context:Context,prefs:android.content.SharedPreferences,unlocked:Boolean,setUnlocked:(Boolean)->Unit,refresh:()->Unit,arabic:Boolean){
+
+private fun trashPrefs(context:Context)=context.getSharedPreferences("google_file_plus_trash",Context.MODE_PRIVATE)
+private fun trashDir(context:Context)=File(context.filesDir,"trash").apply{mkdirs()}
+private fun moveToTrash(context:Context,source:File){
+    val id=java.util.UUID.randomUUID().toString()
+    val target=File(trashDir(context),id+"_"+source.name)
+    copyRec(source,target)
+    if(!source.deleteRecursively()){target.deleteRecursively();throw IllegalStateException("Could not remove original file")}
+    trashPrefs(context).edit().putString(id,source.absolutePath+"|"+System.currentTimeMillis()+"|"+target.name).apply()
+}
+private fun cleanupTrash(context:Context){
+    val prefs=trashPrefs(context);val now=System.currentTimeMillis();val edit=prefs.edit()
+    prefs.all.forEach{(id,value)->val parts=(value as? String)?.split("|",limit=3)?:return@forEach
+        val time=parts.getOrNull(1)?.toLongOrNull()?:0L
+        if(now-time>=90L*24*60*60*1000){File(trashDir(context),parts.getOrNull(2)?: "").deleteRecursively();edit.remove(id)}
+    };edit.apply()
+}
+@Composable private fun TrashScreen(context:Context,refresh:Int,onRefresh:()->Unit,arabic:Boolean){
+    val prefs=trashPrefs(context);val entries=remember(refresh){prefs.all.mapNotNull{(id,v)->val p=(v as? String)?.split("|",limit=3)?:return@mapNotNull null;if(p.size<3)null else Triple(id,p[0],File(trashDir(context),p[2]))}}
+    Column(Modifier.fillMaxSize().padding(bottom=100.dp)){
+        Text(if(arabic)"تُحذف العناصر تلقائيًا بعد 90 يومًا" else "Items are automatically deleted after 90 days",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        if(entries.isEmpty())Text(if(arabic)"سلة المحذوفات فارغة" else "Trash is empty",Modifier.padding(20.dp))
+        LazyColumn { items(entries,key={it.first}){(id,original,file)->
+            Row(Modifier.fillMaxWidth().padding(vertical=8.dp),verticalAlignment=Alignment.CenterVertically){
+                Icon(Icons.Default.Delete,null);Column(Modifier.weight(1f).padding(horizontal=10.dp)){Text(file.name,maxLines=1);Text(original,maxLines=1,style=MaterialTheme.typography.bodySmall)}
+                IconButton(onClick={runCatching{val dest=File(original);dest.parentFile?.mkdirs();copyRec(file,dest);file.deleteRecursively();prefs.edit().remove(id).apply();onRefresh()}}){Icon(Icons.Default.Restore,null)}
+                IconButton(onClick={file.deleteRecursively();prefs.edit().remove(id).apply();onRefresh()}){Icon(Icons.Default.DeleteForever,null)}
+            };HorizontalDivider()
+        }}
+    }
+}
+\n@Composable private fun SpaceScreen(context:Context,prefs:android.content.SharedPreferences,unlocked:Boolean,setUnlocked:(Boolean)->Unit,refresh:()->Unit,arabic:Boolean){
     var password by remember{mutableStateOf("")};var confirm by remember{mutableStateOf("")};var error by remember{mutableStateOf("")}
     val hash=prefs.getString("space_password_hash",null)
     val dir=remember{File(context.filesDir,"space").apply{mkdirs()}}
@@ -147,12 +180,12 @@ private fun sha(s:String)=MessageDigest.getInstance("SHA-256").digest(s.toByteAr
         listOf(ThemeChoice.SYSTEM,ThemeChoice.LIGHT,ThemeChoice.DARK).forEach{Choice(if(arabic)when(it){ThemeChoice.SYSTEM->"حسب الجهاز";ThemeChoice.LIGHT->"فاتح";else->"داكن"}else when(it){ThemeChoice.SYSTEM->"System";ThemeChoice.LIGHT->"Light";else->"Dark"},theme==it){onTheme(it)}}
         Text(if(arabic)"اللغة" else "Language",fontWeight=FontWeight.Bold);listOf(AppLanguage.SYSTEM,AppLanguage.ARABIC,AppLanguage.ENGLISH).forEach{Choice(when(it){AppLanguage.SYSTEM->if(arabic)"لغة الجهاز" else "System";AppLanguage.ARABIC->"العربية";else->"English"},language==it){onLanguage(it)}}
         Text(if(arabic)"Navbar" else "Navigation bar",fontWeight=FontWeight.Bold);Choice(if(arabic)"عائم" else "Floating",nav==NavigationStyle.FLOATING){onNav(NavigationStyle.FLOATING)};Choice(if(arabic)"قياسي" else "Standard",nav==NavigationStyle.STANDARD){onNav(NavigationStyle.STANDARD)}
-        Text(if(arabic)"شفافية Liquid Glass" else "Liquid Glass transparency");Text("${(alpha*100).toInt()}%");Slider(alpha,onAlpha,valueRange=.25f.. .95f)
+        Text(if(arabic)"شفافية خلفية شريط التنقل" else "Navigation bar transparency");Text("${(alpha*100).toInt()}%");Slider(alpha,onAlpha,valueRange=.15f..1f)\n        Text(if(arabic)"قوة تأثير Blur" else "Blur strength");Text("${navBlur.toInt()} dp");Slider(navBlur,onNavBlur,valueRange=0f..24f)\n        Text(if(arabic)"عرض الشريط العائم" else "Floating bar width");Text("${navWidth.toInt()}%");Slider(navWidth,onNavWidth,valueRange=55f..100f)
         Text(if(arabic)"المسافة بين أيقونات Navbar" else "Navbar icon spacing");Text("${spacing.toInt()} dp");Slider(spacing,onSpacing,valueRange=0f..20f)
     }
 }
 @Composable private fun Choice(label:String,selected:Boolean,onClick:()->Unit){Surface(onClick=onClick,shape=RoundedCornerShape(10.dp),color=MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.35f)){Row(Modifier.fillMaxWidth().padding(8.dp),verticalAlignment=Alignment.CenterVertically){Text(label,Modifier.weight(1f));RadioButton(selected,onClick)}}}
-@Composable private fun AppNavigationBar(selected:Destination,onSelect:(Destination)->Unit,floating:Boolean,alpha:Float,spacing:Float,modifier:Modifier,arabic:Boolean){
-    val items=listOf(Triple(Destination.HOME,Icons.Default.Home,if(arabic)"الرئيسية" else "Home"),Triple(Destination.BROWSE,Icons.Default.Folder,if(arabic)"ملفات" else "Files"),Triple(Destination.SPACE,Icons.Default.Lock,"Space"),Triple(Destination.TRASH,Icons.Default.Delete,if(arabic)"المحذوفات" else "Trash"),Triple(Destination.SETTINGS,Icons.Default.Settings,if(arabic)"الإعدادات" else "Settings"))
-    Surface(modifier.fillMaxWidth().then(if(floating)Modifier.padding(start=22.dp,end=22.dp,bottom=8.dp)else Modifier).height(64.dp).then(if(floating)Modifier.shadow(6.dp,RoundedCornerShape(24.dp))else Modifier),shape=if(floating)RoundedCornerShape(24.dp)else RoundedCornerShape(0.dp),color=MaterialTheme.colorScheme.surface.copy(alpha=if(floating)alpha else 1f),tonalElevation=2.dp){Row(Modifier.fillMaxSize().padding(horizontal=spacing.dp),horizontalArrangement=Arrangement.SpaceEvenly,verticalAlignment=Alignment.CenterVertically){items.forEach{(d,ic,label)->NavigationBarItem(selected==d,{onSelect(d)},{Icon(ic,label,Modifier.size(19.dp))},label={Text(label,fontSize=9.sp,maxLines=1)},alwaysShowLabel=true)}}}
+@Composable private fun AppNavigationBar(selected:Destination,onSelect:(Destination)->Unit,floating:Boolean,alpha:Float,spacing:Float,blur:Float,width:Float,modifier:Modifier,arabic:Boolean){
+    val items=listOf(Triple(Destination.HOME,Icons.Default.Home,if(arabic)"الرئيسية" else "Home"),Triple(Destination.SPACE,Icons.Default.Lock,"Space"),Triple(Destination.TRASH,Icons.Default.Delete,if(arabic)"المحذوفات" else "Trash"),Triple(Destination.SETTINGS,Icons.Default.Settings,if(arabic)"الإعدادات" else "Settings"))
+    Surface(modifier.fillMaxWidth(width/100f).then(if(floating)Modifier.padding(bottom=8.dp)else Modifier).height(64.dp).then(if(floating)Modifier.shadow(6.dp,RoundedCornerShape(24.dp))else Modifier).blur(blur.dp),shape=if(floating)RoundedCornerShape(24.dp)else RoundedCornerShape(0.dp),color=MaterialTheme.colorScheme.surface.copy(alpha=alpha),tonalElevation=2.dp){Row(Modifier.fillMaxSize().padding(horizontal=spacing.dp),horizontalArrangement=Arrangement.SpaceEvenly,verticalAlignment=Alignment.CenterVertically){items.forEach{(d,ic,label)->NavigationBarItem(selected==d,{onSelect(d)},{Icon(ic,label,Modifier.size(19.dp))},label={Text(label,fontSize=9.sp,maxLines=1)},alwaysShowLabel=true)}}}
 }
