@@ -15,6 +15,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -255,7 +257,7 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
         AlertDialog(onDismissRequest={pending=null;selected=emptySet()},title={Text(if(arabic)"إعادة تسمية" else "Rename")},text={OutlinedTextField(newName,{newName=it},singleLine=true)},confirmButton={TextButton(onClick={val f=selected.first();val ok=newName.isNotBlank()&&f.renameTo(File(f.parentFile,newName.trim()));pending=null;selected=emptySet();onRefresh();if(!ok)message="Rename failed"}){Text(if(arabic)"حفظ" else "Save")}},dismissButton={TextButton(onClick={pending=null;selected=emptySet()}){Text("Cancel")}})
     }
     if(pending=="Delete"&&selected.isNotEmpty())AlertDialog(onDismissRequest={pending=null;selected=emptySet()},title={Text(if(arabic)"حذف العناصر" else "Delete items")},text={Text(if(arabic)"نقل ${selected.size} عنصر إلى سلة المحذوفات؟" else "Move ${selected.size} item(s) to Trash?")},confirmButton={TextButton(onClick={val errors=selected.toList().mapNotNull{f->runCatching{moveToTrash(context,f)}.exceptionOrNull()?.message};pending=null;selected=emptySet();onRefresh();if(errors.isNotEmpty())message=errors.joinToString("\n")}){Text(if(arabic)"تأكيد" else "Confirm")}},dismissButton={TextButton(onClick={pending=null;selected=emptySet()}){Text("Cancel")}})
-    if(folderDialog)AlertDialog(onDismissRequest={folderDialog=false},title={Text(if(arabic)"مجلد جديد" else "New Folder")},text={OutlinedTextField(folderName,{folderName=it},modifier=Modifier.focusRequester(folderFocus),singleLine=true,placeholder={Text(if(arabic)"اسم المجلد" else "Folder name")})},confirmButton={TextButton(onClick={create}){Text(if(arabic)"إنشاء" else "Create")}},dismissButton={TextButton(onClick={folderDialog=false}){Text("Cancel")}})
+    if(folderDialog)AlertDialog(onDismissRequest={folderDialog=false},title={Text(if(arabic)"مجلد جديد" else "New Folder")},text={OutlinedTextField(folderName,{folderName=it},modifier=Modifier.focusRequester(folderFocus),singleLine=true,placeholder={Text(if(arabic)"اسم المجلد" else "Folder name")})},confirmButton={TextButton(onClick={create()}){Text(if(arabic)"إنشاء" else "Create")}},dismissButton={TextButton(onClick={folderDialog=false}){Text("Cancel")}})
     if(picker)DestinationPickerDialog(arabic,internal,external,{picker=false;pending=null;selected=emptySet()},{finishCopyMove(it)})
     details?.let{f->val date=SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.getDefault()).format(Date(f.lastModified()))
         AlertDialog(onDismissRequest={details=null},title={Text(if(arabic)"بيانات الملف" else "File details")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
@@ -271,25 +273,33 @@ private fun fileIcon(f:File)=when{f.isDirectory->Icons.Default.Folder;isVideo(f)
 @Composable private fun DestinationPickerDialog(arabic:Boolean,internal:File,external:File?,onDismiss:()->Unit,onChoose:(File)->Unit){
     var current by remember{mutableStateOf<File?>(null)}
     val roots=remember(internal,external){listOf(File("/"),internal)+listOfNotNull(external).distinctBy{it.absolutePath}}
-    val dirs=remember(current){current?.let{runCatching{it.listFiles()?.filter{f->f.isDirectory&&f.canRead()}?.sortedBy{f->f.name.lowercase(Locale.ROOT)}.orEmpty()}.getOrDefault(emptyList())}.orEmpty()}
-    Dialog(onDismissRequest=onDismiss,properties=DialogProperties(usePlatformDefaultWidth=false)){
-        Surface(Modifier.fillMaxWidth(.94f).heightIn(max=660.dp),shape=RoundedCornerShape(24.dp)){
-            Column(Modifier.padding(16.dp)){
-                Text(if(arabic)"اختيار مكان النسخ أو النقل" else "Choose destination",style=MaterialTheme.typography.titleLarge)
+    val dirs=remember(current){current?.let{dir->runCatching{dir.listFiles()?.filter{child->child.isDirectory&&child.canRead()}?.sortedBy{child->child.name.lowercase(Locale.ROOT)}.orEmpty()}.getOrDefault(emptyList())}.orEmpty()}
+    AlertDialog(
+        onDismissRequest=onDismiss,
+        title={Text(if(arabic)"اختيار مكان النسخ أو النقل" else "Choose destination")},
+        text={
+            Column(Modifier.heightIn(max=440.dp).verticalScroll(rememberScrollState())){
                 Row(verticalAlignment=Alignment.CenterVertically){
-                    IconButton(onClick={current=current?.parentFile}){Icon(Icons.Default.ArrowBack,null)}
+                    TextButton(onClick={current=current?.parentFile}){Icon(Icons.Default.ArrowBack,null)}
                     Text(current?.absolutePath?:if(arabic)"اختر وحدة التخزين" else "Choose storage",Modifier.weight(1f),maxLines=1)
-                    if(current!=null)TextButton(onClick={onChoose(current!!)} ){Text(if(arabic)"اختر هذا المجلد" else "Use folder")}
+                    if(current!=null)TextButton(onClick={onChoose(current!!)){Text(if(arabic)"اختر هذا المجلد" else "Use folder")}
                 }
                 HorizontalDivider()
-                LazyColumn(Modifier.weight(1f,false)){
-                    if(current==null)items(roots){root->Row(Modifier.fillMaxWidth().combinedClickable(onClick={current=root}).padding(12.dp),verticalAlignment=Alignment.CenterVertically){Icon(if(root.absolutePath=="/")Icons.Default.AdminPanelSettings else if(root==internal)Icons.Default.PhoneAndroid else Icons.Default.SdCard,null);Spacer(Modifier.width(12.dp));Column{Text(if(root.absolutePath=="/")"Root" else if(root==internal)"Internal Storage" else "External Storage");Text(root.absolutePath,style=MaterialTheme.typography.bodySmall)}}}
-                    else items(dirs){dir->Row(Modifier.fillMaxWidth().combinedClickable(onClick={current=dir}).padding(12.dp),verticalAlignment=Alignment.CenterVertically){Icon(Icons.Default.Folder,null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(12.dp));Text(dir.name)}}
+                if(current==null){
+                    roots.forEach{root->TextButton(onClick={current=root},modifier=Modifier.fillMaxWidth()){
+                        Icon(if(root.absolutePath=="/")Icons.Default.AdminPanelSettings else if(root==internal)Icons.Default.PhoneAndroid else Icons.Default.SdCard,null)
+                        Spacer(Modifier.width(8.dp))
+                        Column(horizontalAlignment=Alignment.Start){Text(if(root.absolutePath=="/")"Root" else if(root==internal)"Internal Storage" else "External Storage");Text(root.absolutePath,style=MaterialTheme.typography.bodySmall)}
+                    }}
+                }else{
+                    dirs.forEach{dir->TextButton(onClick={current=dir},modifier=Modifier.fillMaxWidth()){
+                        Icon(Icons.Default.Folder,null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(8.dp));Text(dir.name)
+                    }}
                 }
-                TextButton(onClick=onDismiss,modifier=Modifier.align(Alignment.End)){Text(if(arabic)"إلغاء" else "Cancel")}
             }
-        }
-    }
+        },
+        confirmButton={TextButton(onClick=onDismiss){Text(if(arabic)"إلغاء" else "Cancel")}}
+    )
 }
 
 private fun trashPrefs(context:Context)=context.getSharedPreferences("google_file_plus_trash",Context.MODE_PRIVATE)
