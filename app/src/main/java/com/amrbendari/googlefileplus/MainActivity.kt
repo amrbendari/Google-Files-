@@ -11,7 +11,6 @@ import android.media.ThumbnailUtils
 import android.util.Size
 import android.widget.ImageView
 import android.graphics.drawable.Drawable
-import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import android.os.Build
@@ -349,7 +348,7 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
                     isVideo(file)->@Suppress("DEPRECATION") ThumbnailUtils.createVideoThumbnail(file.absolutePath,android.provider.MediaStore.Images.Thumbnails.MINI_KIND)
                     file.extension.lowercase(Locale.ROOT) in setOf("jpg","jpeg","png","webp","bmp","gif","heic")->{
                         val bounds=BitmapFactory.Options().apply{inJustDecodeBounds=true};BitmapFactory.decodeFile(file.absolutePath,bounds)
-                        val opts=BitmapFactory.Options().apply{inSampleSize=maxOf(1,minOf(bounds.outWidth/256,bounds.outHeight/256)).coerceAtLeast(1)}
+                        val opts=BitmapFactory.Options().apply{inSampleSize=maxOf(1,maxOf(bounds.outWidth/256,bounds.outHeight/256)).coerceAtLeast(1)}
                         BitmapFactory.decodeFile(file.absolutePath,opts)
                     }
                     else->null
@@ -440,7 +439,7 @@ class TrashCleanupWorker(context:Context,params:WorkerParameters):CoroutineWorke
                 TextButton(onClick={confirmDeleteAll=true}){Icon(Icons.Default.DeleteForever,null);Text(if(arabic)"حذف الكل" else "Delete all")}
                 TextButton(onClick={
                     val failed=mutableListOf<String>()
-                    entries.filter{selected.isEmpty()||it.first in selected}.forEach{(id,original,file)->
+                    entries.forEach{(id,original,file)->
                         runCatching{val dest=File(original);dest.parentFile?.mkdirs();copyRec(file,dest);file.deleteRecursively();prefs.edit().remove(id).apply()}.onFailure{failed.add(file.name)}
                     }
                     selected=emptySet();onRefresh()
