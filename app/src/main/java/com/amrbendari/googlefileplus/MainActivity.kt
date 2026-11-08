@@ -273,7 +273,7 @@ private fun fileIcon(f:File)=when{f.isDirectory->Icons.Default.Folder;isVideo(f)
                 Row(verticalAlignment=Alignment.CenterVertically){
                     IconButton(onClick={current=current?.parentFile}){Icon(Icons.Default.ArrowBack,null)}
                     Text(current?.absolutePath?:if(arabic)"اختر وحدة التخزين" else "Choose storage",Modifier.weight(1f),maxLines=1)
-                    if(current!=null)TextButton(onClick={onChoose(current!!)){Text(if(arabic)"اختر هذا المجلد" else "Use folder")}
+                    if(current!=null)TextButton(onClick={onChoose(current!!)} ){Text(if(arabic)"اختر هذا المجلد" else "Use folder")}
                 }
                 HorizontalDivider()
                 LazyColumn(Modifier.weight(1f,false)){
