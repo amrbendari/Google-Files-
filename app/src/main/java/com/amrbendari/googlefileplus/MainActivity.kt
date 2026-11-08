@@ -224,7 +224,7 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
         }
         if(files.isEmpty())Text(if(arabic)"لا توجد ملفات" else "No files found",Modifier.padding(20.dp))
         else if(grid){
-            LazyVerticalGrid(GridCells.Adaptive(112.dp),modifier=Modifier.weight(1f),contentPadding=PaddingValues(bottom=110.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+            LazyVerticalGrid(GridCells.Adaptive(112.dp),modifier=Modifier.fillMaxWidth().heightIn(max=560.dp),contentPadding=PaddingValues(bottom=110.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
                 gridItems(files,key={it.absolutePath}){f->Card(Modifier.fillMaxWidth().combinedClickable(onClick={open(f)},onLongClick={if(selected.isEmpty())menuFile=f else toggle(f)})){
                     Column(Modifier.padding(8.dp),horizontalAlignment=Alignment.CenterHorizontally){
                         Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.TopEnd){Icon(fileIcon(f),null,Modifier.padding(top=10.dp).size(48.dp),tint=MaterialTheme.colorScheme.primary);Checkbox(f in selected,{toggle(f)},modifier=Modifier.size(28.dp))}
@@ -235,7 +235,7 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
                 }}
             }
         }else{
-            LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(bottom=110.dp)){
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max=560.dp),contentPadding=PaddingValues(bottom=110.dp)){
                 items(files,key={it.absolutePath}){f->Row(Modifier.fillMaxWidth().combinedClickable(onClick={open(f)},onLongClick={if(selected.isEmpty())menuFile=f else toggle(f)}).padding(vertical=7.dp),verticalAlignment=Alignment.CenterVertically){
                     Icon(fileIcon(f),null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(10.dp));Column(Modifier.weight(1f)){Text(f.name,maxLines=1);Text(if(f.isDirectory)"Folder" else fmt(f.length()),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
                     Checkbox(f in selected,{toggle(f)});IconButton(onClick={details=f}){Icon(Icons.Default.Info,if(arabic)"التفاصيل" else "Details")};IconButton(onClick={menuFile=f}){Icon(Icons.Default.MoreVert,null)}
