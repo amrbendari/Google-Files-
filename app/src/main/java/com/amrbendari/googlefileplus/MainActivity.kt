@@ -219,3 +219,25 @@ private fun queryMediaFiles(context:Context,kind:String):List<File>{
     }
 }
 
+@Composable private fun SettingsScreen(nav:NavigationStyle,onNav:(NavigationStyle)->Unit,theme:ThemeChoice,onTheme:(ThemeChoice)->Unit,language:AppLanguage,onLanguage:(AppLanguage)->Unit,alpha:Float,onAlpha:(Float)->Unit,spacing:Float,onSpacing:(Float)->Unit,navBlur:Float,onNavBlur:(Float)->Unit,navWidth:Float,onNavWidth:(Float)->Unit,arabic:Boolean){
+    Column(Modifier.fillMaxWidth().padding(bottom=110.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
+        Text(if(arabic)"المظهر" else "Appearance",fontWeight=FontWeight.Bold)
+        listOf(ThemeChoice.SYSTEM,ThemeChoice.LIGHT,ThemeChoice.DARK).forEach{Choice(if(arabic)when(it){ThemeChoice.SYSTEM->"حسب الجهاز";ThemeChoice.LIGHT->"فاتح";else->"داكن"}else when(it){ThemeChoice.SYSTEM->"System";ThemeChoice.LIGHT->"Light";else->"Dark"},theme==it){onTheme(it)}}
+        Text(if(arabic)"اللغة" else "Language",fontWeight=FontWeight.Bold);listOf(AppLanguage.SYSTEM,AppLanguage.ARABIC,AppLanguage.ENGLISH).forEach{Choice(when(it){AppLanguage.SYSTEM->if(arabic)"لغة الجهاز" else "System";AppLanguage.ARABIC->"العربية";else->"English"},language==it){onLanguage(it)}}
+        Text(if(arabic)"Navbar" else "Navigation bar",fontWeight=FontWeight.Bold);Choice(if(arabic)"عائم" else "Floating",nav==NavigationStyle.FLOATING){onNav(NavigationStyle.FLOATING)};Choice(if(arabic)"قياسي" else "Standard",nav==NavigationStyle.STANDARD){onNav(NavigationStyle.STANDARD)}
+        Text(if(arabic)"شفافية خلفية شريط التنقل" else "Navigation bar transparency");Text("${(alpha*100).toInt()}%");Slider(alpha,onAlpha,valueRange=.15f..1f)
+        Text(if(arabic)"قوة تأثير Blur" else "Blur strength");Text("${navBlur.toInt()} dp");Slider(navBlur,onNavBlur,valueRange=0f..24f)
+        Text(if(arabic)"عرض الشريط العائم" else "Floating bar width");Text("${navWidth.toInt()}%");Slider(navWidth,onNavWidth,valueRange=55f..100f)
+        Text(if(arabic)"المسافة بين أيقونات Navbar" else "Navbar icon spacing");Text("${spacing.toInt()} dp");Slider(spacing,onSpacing,valueRange=0f..20f)
+    }
+}
+@Composable private fun Choice(label:String,selected:Boolean,onClick:()->Unit){Surface(onClick=onClick,shape=RoundedCornerShape(10.dp),color=MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.35f)){Row(Modifier.fillMaxWidth().padding(8.dp),verticalAlignment=Alignment.CenterVertically){Text(label,Modifier.weight(1f));RadioButton(selected,onClick)}}}
+@Composable private fun AppNavigationBar(selected:Destination,onSelect:(Destination)->Unit,floating:Boolean,alpha:Float,spacing:Float,blur:Float,width:Float,modifier:Modifier,arabic:Boolean){
+    val items=listOf(Triple(Destination.HOME,Icons.Default.Home,if(arabic)"الرئيسية" else "Home"),Triple(Destination.TRASH,Icons.Default.Delete,if(arabic)"المحذوفات" else "Trash"),Triple(Destination.SETTINGS,Icons.Default.Settings,if(arabic)"الإعدادات" else "Settings"))
+    Box(modifier.fillMaxWidth(if(floating)width/100f else 1f).then(if(floating)Modifier.padding(bottom=8.dp)else Modifier).height(64.dp).then(if(floating)Modifier.shadow(6.dp,RoundedCornerShape(24.dp))else Modifier)){
+        Surface(Modifier.matchParentSize().blur(blur.dp),shape=if(floating)RoundedCornerShape(24.dp)else RoundedCornerShape(0.dp),color=MaterialTheme.colorScheme.surface.copy(alpha=alpha),tonalElevation=2.dp){}
+        Row(Modifier.fillMaxSize().padding(horizontal=spacing.dp),horizontalArrangement=Arrangement.SpaceEvenly,verticalAlignment=Alignment.CenterVertically){
+            items.forEach{(d,ic,label)->NavigationBarItem(selected==d,{onSelect(d)},{Icon(ic,label,Modifier.size(19.dp))},label={Text(label,fontSize=9.sp,maxLines=1)},alwaysShowLabel=true)}
+        }
+    }
+}
