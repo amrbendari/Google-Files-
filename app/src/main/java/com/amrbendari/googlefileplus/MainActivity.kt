@@ -64,6 +64,7 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("google_file_plus_settings", Context.MODE_PRIVATE) }
     var destination by remember { mutableStateOf(Destination.HOME) }
+    val backStack = remember { mutableStateListOf<Destination>() }
     var navStyle by remember { mutableStateOf(enumPref(prefs.getString("navigation_style","FLOATING"), NavigationStyle.FLOATING)) }
     var theme by remember { mutableStateOf(enumPref(prefs.getString("theme_choice","SYSTEM"), ThemeChoice.SYSTEM)) }
     var language by remember { mutableStateOf(enumPref(prefs.getString("app_language","SYSTEM"), AppLanguage.SYSTEM)) }
@@ -78,7 +79,7 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
     val arabic = when(language){AppLanguage.ARABIC->true;AppLanguage.ENGLISH->false;AppLanguage.SYSTEM->Locale.getDefault().language=="ar"}
     val scheme = if(Build.VERSION.SDK_INT>=31){if(dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)}else{if(dark) darkColorScheme() else lightColorScheme()}
     BackHandler {
-        if (destination != Destination.HOME) { if(destination==Destination.SPACE) unlocked.value=false; destination=Destination.HOME }
+        if (destination != Destination.HOME) { if(destination==Destination.SPACE) unlocked.value=false; destination=if(backStack.isNotEmpty()) backStack.removeAt(backStack.lastIndex) else Destination.HOME }
         else { val now=System.currentTimeMillis(); if(now-lastBack<1800L) (context as? ComponentActivity)?.finish() else { lastBack=now; android.widget.Toast.makeText(context,if(arabic) "اضغط رجوع مرة أخرى للخروج" else "Press back again to exit",android.widget.Toast.LENGTH_SHORT).show() } }
     }
     LaunchedEffect(Unit) { cleanupTrash(context) }
@@ -99,7 +100,7 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
                     Destination.SETTINGS->SettingsScreen(navStyle,{navStyle=it;prefs.edit().putString("navigation_style",it.name).apply()},theme,{theme=it;prefs.edit().putString("theme_choice",it.name).apply()},language,{language=it;prefs.edit().putString("app_language",it.name).apply()},alpha,{alpha=it;prefs.edit().putFloat("glass_alpha",it).apply()},spacing,{spacing=it;prefs.edit().putFloat("nav_spacing",it).apply()},navBlur,{navBlur=it;prefs.edit().putFloat("nav_blur",it).apply()},navWidth,{navWidth=it;prefs.edit().putFloat("nav_width",it).apply()},arabic)
                 }
             }
-            AppNavigationBar(destination,{if(destination==Destination.SPACE)unlocked.value=false;destination=it},navStyle==NavigationStyle.FLOATING,alpha,spacing,navBlur,navWidth,Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),arabic)
+            AppNavigationBar(destination,{if(destination==Destination.SPACE)unlocked.value=false;if(it==Destination.HOME)backStack.clear() else if(destination!=it)backStack.add(destination);destination=it},navStyle==NavigationStyle.FLOATING,alpha,spacing,navBlur,navWidth,Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),arabic)
         }}}
     }
 }
