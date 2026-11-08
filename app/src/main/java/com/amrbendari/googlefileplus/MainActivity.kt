@@ -123,7 +123,8 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
     var input by remember{mutableStateOf("")}
     var message by remember{mutableStateOf<String?>(null)}
     val space=remember{File(context.filesDir,"space").apply{mkdirs()}}
-    BackHandler(enabled=current!=null||collection!=null){if(collection!=null)collection=null else current=current?.parentFile}\n    val rootList=remember(refresh,current,access,home,collection){if(access){if(collection!=null){val found=queryMediaFiles(context,collection!!);if(collection=="downloads")found else found.sortedBy{it.name.lowercase()}} else {val base=current; if(base!=null)runCatching{base.listFiles()?.toList().orEmpty().sortedWith(compareBy<File>{!it.isDirectory}.thenBy{it.name.lowercase()})}.getOrDefault(emptyList()) else emptyList()}}else emptyList()}
+    BackHandler(enabled=current!=null||collection!=null){if(collection!=null)collection=null else current=current?.parentFile}
+    val rootList=remember(refresh,current,access,home,collection){if(access){if(collection!=null){val found=queryMediaFiles(context,collection!!);if(collection=="downloads")found else found.sortedBy{it.name.lowercase()}} else {val base=current; if(base!=null)runCatching{base.listFiles()?.toList().orEmpty().sortedWith(compareBy<File>{!it.isDirectory}.thenBy{it.name.lowercase()})}.getOrDefault(emptyList()) else emptyList()}}else emptyList()}
     fun done(){selected=null;action=null;input="";onRefresh()}
     fun perform(a:String,f:File){
         try{when(a){
