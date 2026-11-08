@@ -13,10 +13,19 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.*
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.verticalScroll
@@ -77,7 +86,6 @@ class MainActivity : ComponentActivity() {
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { super.onConfigurationChanged(newConfig) }
 }
 private enum class Destination { HOME, BROWSE, TRASH, SETTINGS }
-private enum class NavigationStyle { FLOATING, STANDARD }
 private enum class ThemeChoice { SYSTEM, LIGHT, DARK }
 private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
 
@@ -86,14 +94,9 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
     val prefs = remember { context.getSharedPreferences("google_file_plus_settings", Context.MODE_PRIVATE) }
     var destination by remember { mutableStateOf(Destination.HOME) }
     val backStack = remember { mutableStateListOf<Destination>() }
-    var navStyle by remember { mutableStateOf(NavigationStyle.STANDARD) }
     var showIntro by remember { mutableStateOf(true) }
     var theme by remember { mutableStateOf(enumPref(prefs.getString("theme_choice","SYSTEM"), ThemeChoice.SYSTEM)) }
     var language by remember { mutableStateOf(enumPref(prefs.getString("app_language","SYSTEM"), AppLanguage.SYSTEM)) }
-    var alpha by remember { mutableFloatStateOf(prefs.getFloat("glass_alpha",.78f)) }
-    var spacing by remember { mutableFloatStateOf(prefs.getFloat("nav_spacing",8f)) }
-    var navBlur by remember { mutableFloatStateOf(prefs.getFloat("nav_blur",0f)) }
-    var navWidth by remember { mutableFloatStateOf(prefs.getFloat("nav_width",92f)) }
     var lastBack by remember { mutableLongStateOf(0L) }
     var refresh by remember { mutableIntStateOf(0) }
     val unlocked = remember { mutableStateOf(false) }
@@ -118,10 +121,10 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
                 when(destination){
                     Destination.HOME,Destination.BROWSE->FileBrowser(context,access,::requestAccess,refresh,{refresh++},arabic,destination==Destination.HOME)
                     Destination.TRASH->TrashScreen(context,refresh,{refresh++},arabic)
-                    Destination.SETTINGS->SettingsScreen(navStyle,{navStyle=it;prefs.edit().putString("navigation_style",it.name).apply()},theme,{theme=it;prefs.edit().putString("theme_choice",it.name).apply()},language,{language=it;prefs.edit().putString("app_language",it.name).apply()},alpha,{alpha=it;prefs.edit().putFloat("glass_alpha",it).apply()},spacing,{spacing=it;prefs.edit().putFloat("nav_spacing",it).apply()},navBlur,{navBlur=it;prefs.edit().putFloat("nav_blur",it).apply()},navWidth,{navWidth=it;prefs.edit().putFloat("nav_width",it).apply()},arabic)
+                    Destination.SETTINGS->SettingsScreen(theme,{theme=it;prefs.edit().putString("theme_choice",it.name).apply()},language,{language=it;prefs.edit().putString("app_language",it.name).apply()},arabic)
                 }
             }
-            AppNavigationBar(destination,{if(it==Destination.HOME)backStack.clear() else if(destination!=it)backStack.add(destination);destination=it},false,1f,spacing,0f,100f,Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),arabic)
+            AppNavigationBar(destination,{if(it==Destination.HOME)backStack.clear() else if(destination!=it)backStack.add(destination);destination=it},Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),arabic)
             if(showIntro) GoogleFilePlusIntro()
         }}}
     }
@@ -172,6 +175,10 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
     var picker by remember{mutableStateOf(false)}
     var details by remember{mutableStateOf<File?>(null)}
     var message by remember{mutableStateOf<String?>(null)}
+    var recentFiles by remember{mutableStateOf(setOf<String>())}
+    var deletingFiles by remember{mutableStateOf(setOf<String>())}
+    val scope=rememberCoroutineScope()
+    LaunchedEffect(recentFiles){if(recentFiles.isNotEmpty()){delay(2000);recentFiles=emptySet()}}
     val folderFocus=remember{FocusRequester()}
     val keyboard=LocalSoftwareKeyboardController.current
     LaunchedEffect(folderDialog){if(folderDialog){folderFocus.requestFocus();keyboard?.show()}}
@@ -197,14 +204,16 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
     fun finishCopyMove(dest:File){
         val action=pending?:return
         val errors=mutableListOf<String>()
+        val affected=mutableSetOf<String>()
         selected.forEach{src->runCatching{
             val target=File(dest,src.name)
             if(src.canonicalPath==target.canonicalPath)throw Exception("Same folder")
             if(action=="Move"&&target.exists())throw Exception("Destination already exists")
             copyRec(src,target)
+            affected.add(target.absolutePath)
             if(action=="Move"&&!src.deleteRecursively()){target.deleteRecursively();throw Exception("Could not delete original")}
         }.onFailure{errors.add(src.name+": "+it.message)}}
-        picker=false;pending=null;selected=emptySet();onRefresh()
+        picker=false;pending=null;selected=emptySet();recentFiles=affected;onRefresh()
         message=if(errors.isEmpty())if(arabic)"تمت العملية بنجاح" else "$action completed" else errors.joinToString("\n")
     }
     if(!access){
@@ -225,6 +234,19 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
             }}
         }
     }else{
+        Row(Modifier.fillMaxSize(),verticalAlignment=Alignment.Top){
+            Column(Modifier.width(132.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.35f)).padding(horizontal=5.dp, vertical=8.dp),verticalArrangement=Arrangement.spacedBy(7.dp)){
+                Text(if(arabic)"المواقع" else "Locations",style=MaterialTheme.typography.labelMedium,fontWeight=FontWeight.Bold,modifier=Modifier.padding(horizontal=7.dp, vertical=4.dp))
+                val quickPlaces=listOf(Triple("Root",File("/"),Icons.Default.AdminPanelSettings),Triple(if(arabic)"الذاكرة الداخلية" else "Internal",internal,Icons.Default.PhoneAndroid)) + listOfNotNull(external?.let{Triple(if(arabic)"الذاكرة الخارجية" else "External",it,Icons.Default.SdCard)})
+                quickPlaces.forEachIndexed{index,item->
+                    val (label,path,ic)=item
+                    val active=current?.absolutePath==path.absolutePath && collection==null
+                    Surface(onClick={collection=null;current=path;selected=emptySet();searchOpen=false;query=""},shape=RoundedCornerShape(12.dp),color=if(active)MaterialTheme.colorScheme.primaryContainer else Color.Transparent,modifier=Modifier.fillMaxWidth()){
+                        Column(Modifier.padding(vertical=10.dp,horizontal=7.dp),horizontalAlignment=Alignment.CenterHorizontally){Icon(ic,null,tint=if(active)MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.primary);Text(label,style=MaterialTheme.typography.labelSmall,maxLines=1);Text(if(index==0)"/" else if(index==1)"Internal" else "SD",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)}
+                    }
+                }
+            }
+            Column(Modifier.weight(1f).fillMaxHeight().padding(start=6.dp)) {
         Row(verticalAlignment=Alignment.CenterVertically){
             IconButton(onClick={if(selected.isNotEmpty())selected=emptySet() else if(collection!=null)collection=null else current=current?.parentFile}){Icon(Icons.Default.ArrowBack,null)}
             Text(if(selected.isNotEmpty())"${selected.size} selected" else collection?:current?.absolutePath?:internal.absolutePath,Modifier.weight(1f),maxLines=1,style=MaterialTheme.typography.bodySmall)
@@ -246,10 +268,15 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
             TextButton(onClick={pending="Move";picker=true}){Icon(Icons.Default.DriveFileMove,null);Text(if(arabic)"نقل" else "Move")}
             TextButton(onClick={pending="Delete"}){Icon(Icons.Default.Delete,null);Text(if(arabic)"حذف" else "Delete")}
         }
+        AnimatedContent(targetState=current?.absolutePath?:collection?:"home",transitionSpec={fadeIn(tween(160))+slideInHorizontally{it/12} togetherWith fadeOut(tween(120))+slideOutHorizontally{-it/12}},label="folder_navigation"){
         if(files.isEmpty())Text(if(arabic)"لا توجد ملفات" else "No files found",Modifier.padding(20.dp))
         else if(grid){
             LazyVerticalGrid(GridCells.Adaptive(112.dp),modifier=Modifier.fillMaxWidth(),contentPadding=PaddingValues(bottom=110.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
-                gridItems(files,key={it.absolutePath}){f->Card(Modifier.fillMaxWidth().combinedClickable(onClick={open(f)},onLongClick={if(selected.isEmpty())menuFile=f else toggle(f)})){
+                gridItems(files,key={it.absolutePath}){f->
+                    val key=f.absolutePath
+                    val targetColor by animateColorAsState(if(key in recentFiles)MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surface, label="file_transfer_highlight")
+                    val fade by androidx.compose.animation.core.animateFloatAsState(if(key in deletingFiles)0f else 1f,animationSpec=tween(260),label="delete_fade")
+                    Card(Modifier.fillMaxWidth().graphicsLayer{alpha=fade}.animateContentSize().combinedClickable(onClick={open(f)},onLongClick={if(selected.isEmpty())menuFile=f else toggle(f)}),colors=CardDefaults.cardColors(containerColor=targetColor)){
                     Column(Modifier.padding(8.dp),horizontalAlignment=Alignment.CenterHorizontally){
                         Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.TopEnd){Icon(fileIcon(f),null,Modifier.padding(top=10.dp).size(48.dp),tint=MaterialTheme.colorScheme.primary);Checkbox(f in selected,{toggle(f)},modifier=Modifier.size(28.dp))}
                         Text(f.name,maxLines=2,minLines=2,style=MaterialTheme.typography.bodySmall)
@@ -260,11 +287,18 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
             }
         }else{
             LazyColumn(Modifier.fillMaxWidth(),contentPadding=PaddingValues(bottom=110.dp)){
-                items(files,key={it.absolutePath}){f->Row(Modifier.fillMaxWidth().combinedClickable(onClick={open(f)},onLongClick={if(selected.isEmpty())menuFile=f else toggle(f)}).padding(vertical=7.dp),verticalAlignment=Alignment.CenterVertically){
+                items(files,key={it.absolutePath}){f->
+                    val key=f.absolutePath
+                    val targetColor by animateColorAsState(if(key in recentFiles)MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surface, label="file_transfer_highlight")
+                    val fade by androidx.compose.animation.core.animateFloatAsState(if(key in deletingFiles)0f else 1f,animationSpec=tween(260),label="delete_fade")
+                    Row(Modifier.fillMaxWidth().graphicsLayer{alpha=fade}.background(targetColor,RoundedCornerShape(10.dp)).animateContentSize().combinedClickable(onClick={open(f)},onLongClick={if(selected.isEmpty())menuFile=f else toggle(f)}).padding(vertical=7.dp,horizontal=5.dp),verticalAlignment=Alignment.CenterVertically){
                     Icon(fileIcon(f),null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(10.dp));Column(Modifier.weight(1f)){Text(f.name,maxLines=1);Text(if(f.isDirectory)"Folder" else fmt(f.length()),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
                     Checkbox(f in selected,{toggle(f)});IconButton(onClick={details=f}){Icon(Icons.Default.Info,if(arabic)"التفاصيل" else "Details")};IconButton(onClick={menuFile=f}){Icon(Icons.Default.MoreVert,null)}
                 };HorizontalDivider()}
             }
+        }
+            }
+        }
         }
     }
     menuFile?.let{f->AlertDialog(onDismissRequest={menuFile=null},title={Text(f.name,maxLines=1)},text={Column{
@@ -280,7 +314,7 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
         var newName by remember(selected){mutableStateOf(selected.first().name)}
         AlertDialog(onDismissRequest={pending=null;selected=emptySet()},title={Text(if(arabic)"إعادة تسمية" else "Rename")},text={OutlinedTextField(newName,{newName=it},singleLine=true)},confirmButton={TextButton(onClick={val f=selected.first();val ok=newName.isNotBlank()&&f.renameTo(File(f.parentFile,newName.trim()));pending=null;selected=emptySet();onRefresh();if(!ok)message="Rename failed"}){Text(if(arabic)"حفظ" else "Save")}},dismissButton={TextButton(onClick={pending=null;selected=emptySet()}){Text("Cancel")}})
     }
-    if(pending=="Delete"&&selected.isNotEmpty())AlertDialog(onDismissRequest={pending=null;selected=emptySet()},title={Text(if(arabic)"حذف العناصر" else "Delete items")},text={Text(if(arabic)"نقل ${selected.size} عنصر إلى سلة المحذوفات؟" else "Move ${selected.size} item(s) to Trash?")},confirmButton={TextButton(onClick={val errors=selected.toList().mapNotNull{f->runCatching{moveToTrash(context,f)}.exceptionOrNull()?.message};pending=null;selected=emptySet();onRefresh();if(errors.isNotEmpty())message=errors.joinToString("\n")}){Text(if(arabic)"تأكيد" else "Confirm")}},dismissButton={TextButton(onClick={pending=null;selected=emptySet()}){Text("Cancel")}})
+    if(pending=="Delete"&&selected.isNotEmpty())AlertDialog(onDismissRequest={pending=null;selected=emptySet()},title={Text(if(arabic)"حذف العناصر" else "Delete items")},text={Text(if(arabic)"نقل ${selected.size} عنصر إلى سلة المحذوفات؟" else "Move ${selected.size} item(s) to Trash?")},confirmButton={TextButton(onClick={val doomed=selected.toList();deletingFiles=doomed.map{it.absolutePath}.toSet();scope.launch{delay(270);val errors=doomed.mapNotNull{f->runCatching{moveToTrash(context,f)}.exceptionOrNull()?.message};deletingFiles=emptySet();pending=null;selected=emptySet();onRefresh();if(errors.isNotEmpty())message=errors.joinToString("\n")}}){Text(if(arabic)"تأكيد" else "Confirm")}},dismissButton={TextButton(onClick={pending=null;selected=emptySet()}){Text("Cancel")}})
     if(folderDialog)AlertDialog(onDismissRequest={folderDialog=false},title={Text(if(arabic)"مجلد جديد" else "New Folder")},text={OutlinedTextField(folderName,{folderName=it},modifier=Modifier.focusRequester(folderFocus),singleLine=true,placeholder={Text(if(arabic)"اسم المجلد" else "Folder name")})},confirmButton={TextButton(onClick={create()}){Text(if(arabic)"إنشاء" else "Create")}},dismissButton={TextButton(onClick={folderDialog=false}){Text("Cancel")}})
     if(picker)DestinationPickerDialog(arabic,internal,external,{picker=false;pending=null;selected=emptySet()},{finishCopyMove(it)})
     details?.let{f->val date=SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.getDefault()).format(Date(f.lastModified()))
@@ -403,25 +437,17 @@ private fun queryMediaFiles(context:Context,kind:String):List<File>{
     }
 }
 
-@Composable private fun SettingsScreen(nav:NavigationStyle,onNav:(NavigationStyle)->Unit,theme:ThemeChoice,onTheme:(ThemeChoice)->Unit,language:AppLanguage,onLanguage:(AppLanguage)->Unit,alpha:Float,onAlpha:(Float)->Unit,spacing:Float,onSpacing:(Float)->Unit,navBlur:Float,onNavBlur:(Float)->Unit,navWidth:Float,onNavWidth:(Float)->Unit,arabic:Boolean){
+@Composable private fun SettingsScreen(theme:ThemeChoice,onTheme:(ThemeChoice)->Unit,language:AppLanguage,onLanguage:(AppLanguage)->Unit,arabic:Boolean){
     Column(Modifier.fillMaxWidth().padding(bottom=110.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
         Text(if(arabic)"المظهر" else "Appearance",fontWeight=FontWeight.Bold)
         listOf(ThemeChoice.SYSTEM,ThemeChoice.LIGHT,ThemeChoice.DARK).forEach{Choice(if(arabic)when(it){ThemeChoice.SYSTEM->"حسب الجهاز";ThemeChoice.LIGHT->"فاتح";else->"داكن"}else when(it){ThemeChoice.SYSTEM->"System";ThemeChoice.LIGHT->"Light";else->"Dark"},theme==it){onTheme(it)}}
         Text(if(arabic)"اللغة" else "Language",fontWeight=FontWeight.Bold);listOf(AppLanguage.SYSTEM,AppLanguage.ARABIC,AppLanguage.ENGLISH).forEach{Choice(when(it){AppLanguage.SYSTEM->if(arabic)"لغة الجهاز" else "System";AppLanguage.ARABIC->"العربية";else->"English"},language==it){onLanguage(it)}}
-        Text(if(arabic)"Navbar" else "Navigation bar",fontWeight=FontWeight.Bold);Choice(if(arabic)"عائم" else "Floating",nav==NavigationStyle.FLOATING){onNav(NavigationStyle.FLOATING)};Choice(if(arabic)"قياسي" else "Standard",nav==NavigationStyle.STANDARD){onNav(NavigationStyle.STANDARD)}
-        Text(if(arabic)"شفافية خلفية شريط التنقل" else "Navigation bar transparency");Text("${(alpha*100).toInt()}%");Slider(alpha,onAlpha,valueRange=.15f..1f)
-        Text(if(arabic)"قوة تأثير Blur" else "Blur strength");Text("${navBlur.toInt()} dp");Slider(navBlur,onNavBlur,valueRange=0f..24f)
-        Text(if(arabic)"عرض الشريط العائم" else "Floating bar width");Text("${navWidth.toInt()}%");Slider(navWidth,onNavWidth,valueRange=55f..100f)
-        Text(if(arabic)"المسافة بين أيقونات Navbar" else "Navbar icon spacing");Text("${spacing.toInt()} dp");Slider(spacing,onSpacing,valueRange=0f..20f)
     }
 }
 @Composable private fun Choice(label:String,selected:Boolean,onClick:()->Unit){Surface(onClick=onClick,shape=RoundedCornerShape(10.dp),color=MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.35f)){Row(Modifier.fillMaxWidth().padding(8.dp),verticalAlignment=Alignment.CenterVertically){Text(label,Modifier.weight(1f));RadioButton(selected,onClick)}}}
-@Composable private fun AppNavigationBar(selected:Destination,onSelect:(Destination)->Unit,floating:Boolean,alpha:Float,spacing:Float,blur:Float,width:Float,modifier:Modifier,arabic:Boolean){
+@Composable private fun AppNavigationBar(selected:Destination,onSelect:(Destination)->Unit,modifier:Modifier,arabic:Boolean){
     val items=listOf(Triple(Destination.HOME,Icons.Default.Home,if(arabic)"الرئيسية" else "Home"),Triple(Destination.TRASH,Icons.Default.Delete,if(arabic)"المحذوفات" else "Trash"),Triple(Destination.SETTINGS,Icons.Default.Settings,if(arabic)"الإعدادات" else "Settings"))
-    Box(modifier.fillMaxWidth(if(floating)width/100f else 1f).then(if(floating)Modifier.padding(bottom=8.dp)else Modifier).height(64.dp).then(if(floating)Modifier.shadow(6.dp,RoundedCornerShape(24.dp))else Modifier)){
-        Surface(Modifier.matchParentSize().blur(blur.dp),shape=if(floating)RoundedCornerShape(24.dp)else RoundedCornerShape(0.dp),color=MaterialTheme.colorScheme.surface.copy(alpha=alpha),tonalElevation=2.dp){}
-        Row(Modifier.fillMaxSize().padding(horizontal=spacing.dp),horizontalArrangement=Arrangement.SpaceEvenly,verticalAlignment=Alignment.CenterVertically){
-            items.forEach{(d,ic,label)->NavigationBarItem(selected==d,{onSelect(d)},{Icon(ic,label,Modifier.size(19.dp))},label={Text(label,fontSize=9.sp,maxLines=1)},alwaysShowLabel=true)}
-        }
+    NavigationBar(modifier.fillMaxWidth().height(64.dp),containerColor=MaterialTheme.colorScheme.surface){
+        items.forEach{(d,ic,label)->NavigationBarItem(selected==d,{onSelect(d)},{Icon(ic,label,Modifier.size(19.dp))},label={Text(label,fontSize=9.sp,maxLines=1)},alwaysShowLabel=true)}
     }
 }
