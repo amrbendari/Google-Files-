@@ -61,13 +61,21 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
     var theme by remember { mutableStateOf(enumPref(prefs.getString("theme_choice","SYSTEM"), ThemeChoice.SYSTEM)) }
     var language by remember { mutableStateOf(enumPref(prefs.getString("app_language","SYSTEM"), AppLanguage.SYSTEM)) }
     var alpha by remember { mutableFloatStateOf(prefs.getFloat("glass_alpha",.78f)) }
-    var spacing by remember { mutableFloatStateOf(prefs.getFloat("nav_spacing",8f)) }\n    var navBlur by remember { mutableFloatStateOf(prefs.getFloat("nav_blur",0f)) }\n    var navWidth by remember { mutableFloatStateOf(prefs.getFloat("nav_width",92f)) }\n    var lastBack by remember { mutableLongStateOf(0L) }
+    var spacing by remember { mutableFloatStateOf(prefs.getFloat("nav_spacing",8f)) }
+    var navBlur by remember { mutableFloatStateOf(prefs.getFloat("nav_blur",0f)) }
+    var navWidth by remember { mutableFloatStateOf(prefs.getFloat("nav_width",92f)) }
+    var lastBack by remember { mutableLongStateOf(0L) }
     var refresh by remember { mutableIntStateOf(0) }
     val unlocked = remember { mutableStateOf(false) }
     val dark = when(theme){ThemeChoice.SYSTEM->androidx.compose.foundation.isSystemInDarkTheme();ThemeChoice.LIGHT->false;ThemeChoice.DARK->true}
     val arabic = when(language){AppLanguage.ARABIC->true;AppLanguage.ENGLISH->false;AppLanguage.SYSTEM->Locale.getDefault().language=="ar"}
     val scheme = if(Build.VERSION.SDK_INT>=31){if(dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)}else{if(dark) darkColorScheme() else lightColorScheme()}
-    BackHandler {\n        if (destination != Destination.HOME) { if(destination==Destination.SPACE) unlocked.value=false; destination=Destination.HOME }\n        else { val now=System.currentTimeMillis(); if(now-lastBack<1800L) (context as? ComponentActivity)?.finish() else { lastBack=now; android.widget.Toast.makeText(context,if(arabic) "اضغط رجوع مرة أخرى للخروج" else "Press back again to exit",android.widget.Toast.LENGTH_SHORT).show() } }\n    }\n    LaunchedEffect(Unit) { cleanupTrash(context) }\n    val access = remember(refresh) { if(Build.VERSION.SDK_INT>=30) Environment.isExternalStorageManager() else ContextCompat.checkSelfPermission(context,Manifest.permission.READ_EXTERNAL_STORAGE)==PackageManager.PERMISSION_GRANTED }
+    BackHandler {
+        if (destination != Destination.HOME) { if(destination==Destination.SPACE) unlocked.value=false; destination=Destination.HOME }
+        else { val now=System.currentTimeMillis(); if(now-lastBack<1800L) (context as? ComponentActivity)?.finish() else { lastBack=now; android.widget.Toast.makeText(context,if(arabic) "اضغط رجوع مرة أخرى للخروج" else "Press back again to exit",android.widget.Toast.LENGTH_SHORT).show() } }
+    }
+    LaunchedEffect(Unit) { cleanupTrash(context) }
+    val access = remember(refresh) { if(Build.VERSION.SDK_INT>=30) Environment.isExternalStorageManager() else ContextCompat.checkSelfPermission(context,Manifest.permission.READ_EXTERNAL_STORAGE)==PackageManager.PERMISSION_GRANTED }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){refresh++}
     val settings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()){refresh++}
     fun requestAccess(){ if(Build.VERSION.SDK_INT>=30){val i=Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,Uri.parse("package:${context.packageName}"));try{settings.launch(i)}catch(_:Exception){settings.launch(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))}}else permission.launch(arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE,Manifest.permission.WRITE_EXTERNAL_STORAGE)) }
@@ -165,7 +173,8 @@ private fun cleanupTrash(context:Context){
         }}
     }
 }
-\n@Composable private fun SpaceScreen(context:Context,prefs:android.content.SharedPreferences,unlocked:Boolean,setUnlocked:(Boolean)->Unit,refresh:()->Unit,arabic:Boolean){
+
+@Composable private fun SpaceScreen(context:Context,prefs:android.content.SharedPreferences,unlocked:Boolean,setUnlocked:(Boolean)->Unit,refresh:()->Unit,arabic:Boolean){
     var password by remember{mutableStateOf("")};var confirm by remember{mutableStateOf("")};var error by remember{mutableStateOf("")}
     val hash=prefs.getString("space_password_hash",null)
     val dir=remember{File(context.filesDir,"space").apply{mkdirs()}}
@@ -180,7 +189,9 @@ private fun sha(s:String)=MessageDigest.getInstance("SHA-256").digest(s.toByteAr
         listOf(ThemeChoice.SYSTEM,ThemeChoice.LIGHT,ThemeChoice.DARK).forEach{Choice(if(arabic)when(it){ThemeChoice.SYSTEM->"حسب الجهاز";ThemeChoice.LIGHT->"فاتح";else->"داكن"}else when(it){ThemeChoice.SYSTEM->"System";ThemeChoice.LIGHT->"Light";else->"Dark"},theme==it){onTheme(it)}}
         Text(if(arabic)"اللغة" else "Language",fontWeight=FontWeight.Bold);listOf(AppLanguage.SYSTEM,AppLanguage.ARABIC,AppLanguage.ENGLISH).forEach{Choice(when(it){AppLanguage.SYSTEM->if(arabic)"لغة الجهاز" else "System";AppLanguage.ARABIC->"العربية";else->"English"},language==it){onLanguage(it)}}
         Text(if(arabic)"Navbar" else "Navigation bar",fontWeight=FontWeight.Bold);Choice(if(arabic)"عائم" else "Floating",nav==NavigationStyle.FLOATING){onNav(NavigationStyle.FLOATING)};Choice(if(arabic)"قياسي" else "Standard",nav==NavigationStyle.STANDARD){onNav(NavigationStyle.STANDARD)}
-        Text(if(arabic)"شفافية خلفية شريط التنقل" else "Navigation bar transparency");Text("${(alpha*100).toInt()}%");Slider(alpha,onAlpha,valueRange=.15f..1f)\n        Text(if(arabic)"قوة تأثير Blur" else "Blur strength");Text("${navBlur.toInt()} dp");Slider(navBlur,onNavBlur,valueRange=0f..24f)\n        Text(if(arabic)"عرض الشريط العائم" else "Floating bar width");Text("${navWidth.toInt()}%");Slider(navWidth,onNavWidth,valueRange=55f..100f)
+        Text(if(arabic)"شفافية خلفية شريط التنقل" else "Navigation bar transparency");Text("${(alpha*100).toInt()}%");Slider(alpha,onAlpha,valueRange=.15f..1f)
+        Text(if(arabic)"قوة تأثير Blur" else "Blur strength");Text("${navBlur.toInt()} dp");Slider(navBlur,onNavBlur,valueRange=0f..24f)
+        Text(if(arabic)"عرض الشريط العائم" else "Floating bar width");Text("${navWidth.toInt()}%");Slider(navWidth,onNavWidth,valueRange=55f..100f)
         Text(if(arabic)"المسافة بين أيقونات Navbar" else "Navbar icon spacing");Text("${spacing.toInt()} dp");Slider(spacing,onSpacing,valueRange=0f..20f)
     }
 }
