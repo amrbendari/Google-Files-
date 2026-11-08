@@ -18,6 +18,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -54,6 +57,8 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.Locale
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -120,44 +125,166 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable private fun FileBrowser(context:Context,access:Boolean,request:()->Unit,refresh:Int,onRefresh:()->Unit,arabic:Boolean,home:Boolean){
+    val internal=remember{Environment.getExternalStorageDirectory()}
     val external=remember{context.getExternalFilesDirs(null).getOrNull(1)?.let{var f:File?=it;repeat(4){f=f?.parentFile};f}?.takeIf{it.exists()}}
     var current by remember{mutableStateOf<File?>(null)}
     var collection by remember{mutableStateOf<String?>(null)}
     var playing by remember{mutableStateOf<File?>(null)}
-    var selected by remember{mutableStateOf<File?>(null)}
-    var action by remember{mutableStateOf<String?>(null)}
-    var input by remember{mutableStateOf("")}
+    var menuFile by remember{mutableStateOf<File?>(null)}
+    var pending by remember{mutableStateOf<String?>(null)}
+    var selected by remember{mutableStateOf(setOf<File>())}
+    var searchOpen by remember{mutableStateOf(false)}
+    var query by remember{mutableStateOf("")}
+    var sort by remember{mutableStateOf("az")}
+    var sortMenu by remember{mutableStateOf(false)}
+    var grid by remember{mutableStateOf(false)}
+    var folderDialog by remember{mutableStateOf(false)}
+    var folderName by remember{mutableStateOf("")}
+    var picker by remember{mutableStateOf(false)}
+    var details by remember{mutableStateOf<File?>(null)}
     var message by remember{mutableStateOf<String?>(null)}
-    BackHandler(enabled=current!=null||collection!=null){if(collection!=null)collection=null else current=current?.parentFile}
-    val rootList=remember(refresh,current,access,home,collection){if(access){if(collection!=null){val found=queryMediaFiles(context,collection!!);if(collection=="downloads")found else found.sortedBy{it.name.lowercase()}} else {val base=current; if(base!=null)runCatching{base.listFiles()?.toList().orEmpty().sortedWith(compareBy<File>{!it.isDirectory}.thenBy{it.name.lowercase()})}.getOrDefault(emptyList()) else emptyList()}}else emptyList()}
-    fun done(){selected=null;action=null;input="";onRefresh()}
-    fun perform(a:String,f:File){
-        try{when(a){
-            "Delete","حذف"->{moveToTrash(context,f);message=if(arabic)"تم نقل الملف إلى سلة المحذوفات" else "Moved to Trash"}
-            "Permanent delete","حذف نهائي"->{f.deleteRecursively()}
-            "Rename","إعادة تسمية"->{val target=File(f.parentFile,input.trim());if(input.isNotBlank()&&f.renameTo(target)){}else throw Exception("Rename failed")}
-            "Copy","نسخ","Move","نقل"->{val target=File(input.trim());if(input.isBlank())throw Exception("Enter destination path");copyRec(f,File(target,f.name));if(a=="Move"||a=="نقل")f.deleteRecursively()}
-            "Compress","ضغط"->{val out=File(f.parentFile,f.nameWithoutExtension+".zip");zipFolder(f,out)}
-            "Extract","استخراج"->{if(f.extension.lowercase()!="zip")throw Exception("ZIP extraction supported currently");unzip(f,File(f.parentFile,f.nameWithoutExtension))}
-            
-            "Share","مشاركة"->{val u=FileProvider.getUriForFile(context,context.packageName+".provider",f);val i=Intent(Intent.ACTION_SEND).setType(mime(f)).putExtra(Intent.EXTRA_STREAM,u).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);context.startActivity(Intent.createChooser(i,"Share"))}
-        }}catch(e:Exception){message=e.message?: "Operation failed"};done()
+    LaunchedEffect(home){if(!home&&current==null)current=internal}
+    BackHandler(enabled=current!=null||collection!=null||selected.isNotEmpty()||searchOpen){
+        when{selected.isNotEmpty()->selected=emptySet();searchOpen->{searchOpen=false;query=""};collection!=null->collection=null;else->current=current?.parentFile}
     }
-    if(!access){Column(horizontalAlignment=Alignment.CenterHorizontally,modifier=Modifier.fillMaxWidth().padding(24.dp)){Icon(Icons.Default.FolderOpen,null,Modifier.size(54.dp));Text(if(arabic)"اسمح بالوصول إلى كل الملفات" else "Allow access to all files");Button(onClick=request){Text(if(arabic)"منح الصلاحية" else "Grant access")}}}
-    else if(home&&current==null&&collection==null){
-        val cards=listOf(Triple("Root","/",Icons.Default.AdminPanelSettings),Triple(if(arabic)"Internal Storage" else "Internal Storage",Environment.getExternalStorageDirectory().absolutePath,Icons.Default.PhoneAndroid),Triple(if(arabic)"External Storage" else "External Storage",external?.absolutePath?: "Not available",Icons.Default.SdCard))
-        LazyColumn(verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(bottom=110.dp)){item{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(14.dp)){Text(if(arabic)"مكتبتك" else "Your library",fontWeight=FontWeight.Bold);Spacer(Modifier.height(8.dp));Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf(Triple("videos",Icons.Default.VideoLibrary,if(arabic)"ملفات فيديو" else "Videos"),Triple("images",Icons.Default.PhotoLibrary,if(arabic)"الصور" else "Images"),Triple("downloads",Icons.Default.Download,if(arabic)"تحميلات" else "Downloads")).forEach{(key,ic,label)->Column(Modifier.weight(1f).combinedClickable(onClick={collection=key},onLongClick={}).padding(8.dp),horizontalAlignment=Alignment.CenterHorizontally){Icon(ic,null,tint=MaterialTheme.colorScheme.primary,modifier=Modifier.size(28.dp));Text(label,style=MaterialTheme.typography.labelMedium)}}}}}};items(cards){(name,path,ic)->Card(Modifier.fillMaxWidth().combinedClickable(onClick={if(path=="Not available")message=if(arabic)"لا توجد بطاقة خارجية" else "No external SD card detected" else current=File(path)},onLongClick={message=path})){Row(Modifier.padding(18.dp),verticalAlignment=Alignment.CenterVertically){Icon(ic,null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(16.dp));Column{Text(name,fontWeight=FontWeight.SemiBold);Text(path,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}}}}}
+    val files=remember(refresh,current,access,collection,sort,query){
+        val all=if(!access) emptyList() else if(collection!=null)queryMediaFiles(context,collection!!) else current?.let{runCatching{it.listFiles()?.toList().orEmpty()}.getOrDefault(emptyList())}.orEmpty()
+        val filtered=all.filter{it.name.contains(query,true)}
+        when(sort){"newest"->filtered.sortedByDescending{it.lastModified()};"oldest"->filtered.sortedBy{it.lastModified()};"largest"->filtered.sortedByDescending{if(it.isFile)it.length() else 0L};else->filtered.sortedBy{it.name.lowercase(Locale.ROOT)}}
+    }
+    fun toggle(f:File){selected=if(f in selected)selected-f else selected+f}
+    fun open(f:File){if(selected.isNotEmpty())toggle(f) else if(f.isDirectory)current=f else if(isMedia(f))playing=f else openFile(context,f)}
+    fun create(){
+        val parent=current?:internal
+        val name=folderName.trim()
+        if(name.isBlank()){message=if(arabic)"اكتب اسم المجلد" else "Enter a folder name";return}
+        val target=File(parent,name)
+        if(target.exists()){message=if(arabic)"الاسم مستخدم بالفعل" else "That name already exists";return}
+        if(target.mkdir()){folderDialog=false;folderName="";onRefresh()}else message=if(arabic)"تعذر إنشاء المجلد" else "Could not create folder"
+    }
+    fun finishCopyMove(dest:File){
+        val action=pending?:return
+        val errors=mutableListOf<String>()
+        selected.forEach{src->runCatching{
+            val target=File(dest,src.name)
+            if(src.canonicalPath==target.canonicalPath)throw Exception("Same folder")
+            if(action=="Move"&&target.exists())throw Exception("Destination already exists")
+            copyRec(src,target)
+            if(action=="Move"&&!src.deleteRecursively()){target.deleteRecursively();throw Exception("Could not delete original")}
+        }.onFailure{errors.add(src.name+": "+it.message)}}
+        picker=false;pending=null;selected=emptySet();onRefresh()
+        message=if(errors.isEmpty())if(arabic)"تمت العملية بنجاح" else "$action completed" else errors.joinToString("\n")
+    }
+    if(!access){
+        Column(horizontalAlignment=Alignment.CenterHorizontally,modifier=Modifier.fillMaxWidth().padding(24.dp)){Icon(Icons.Default.FolderOpen,null,Modifier.size(54.dp));Text(if(arabic)"اسمح بالوصول إلى كل الملفات" else "Allow access to all files");Button(onClick=request){Text(if(arabic)"منح الصلاحية" else "Grant access")}}
+    }else if(home&&current==null&&collection==null){
+        val roots=listOf(Triple("Root","/",Icons.Default.AdminPanelSettings),Triple("Internal Storage",internal.absolutePath,Icons.Default.PhoneAndroid),Triple(if(arabic)"External Storage" else "External Storage",external?.absolutePath?:"Not available",Icons.Default.SdCard))
+        LazyColumn(verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(bottom=110.dp)){
+            item{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(12.dp)){
+                Text(if(arabic)"مكتبتك" else "Your library",fontWeight=FontWeight.Bold)
+                Row(horizontalArrangement=Arrangement.spacedBy(2.dp)){
+                    listOf(Triple("videos",Icons.Default.VideoLibrary,if(arabic)"فيديو" else "Videos"),Triple("audio",Icons.Default.AudioFile,if(arabic)"صوتيات" else "Audio"),Triple("images",Icons.Default.PhotoLibrary,if(arabic)"صور" else "Images"),Triple("downloads",Icons.Default.Download,if(arabic)"تحميل" else "Downloads")).forEach{(key,icon,label)->
+                        Column(Modifier.weight(1f).combinedClickable(onClick={collection=key}).padding(6.dp),horizontalAlignment=Alignment.CenterHorizontally){Icon(icon,null,tint=MaterialTheme.colorScheme.primary,modifier=Modifier.size(26.dp));Text(label,style=MaterialTheme.typography.labelSmall,maxLines=1)}
+                    }
+                }
+            }}}
+            items(roots){(name,path,icon)->Card(Modifier.fillMaxWidth().combinedClickable(onClick={if(path=="Not available")message=if(arabic)"لا توجد بطاقة خارجية" else "No external SD card" else current=File(path)})){
+                Row(Modifier.padding(18.dp),verticalAlignment=Alignment.CenterVertically){Icon(icon,null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(12.dp));Column{Text(name,fontWeight=FontWeight.SemiBold);Text(path,style=MaterialTheme.typography.bodySmall)}}
+            }}
+        }
     }else{
-        Row(verticalAlignment=Alignment.CenterVertically){IconButton(onClick={if(collection!=null)collection=null else current=current?.parentFile}){Icon(Icons.Default.ArrowBack,null)};Text(current?.absolutePath?:Environment.getExternalStorageDirectory().absolutePath,Modifier.weight(1f),maxLines=1);IconButton(onClick=onRefresh){Icon(Icons.Default.Refresh,null)}}
-        LazyColumn(contentPadding=PaddingValues(bottom=110.dp)){items(rootList,key={it.absolutePath}){f->Row(Modifier.fillMaxWidth().combinedClickable(onClick={if(f.isDirectory)current=f else if(f.extension.equals("zip",true)){selected=f;action="Extract"}else if(isMedia(f))playing=f else openFile(context,f)},onLongClick={selected=f;action="menu"}).padding(vertical=10.dp),verticalAlignment=Alignment.CenterVertically){Icon(if(f.isDirectory)Icons.Default.Folder else Icons.Default.InsertDriveFile,null,tint=if(f.isDirectory)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant);Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text(f.name,maxLines=1);Text(if(f.isDirectory)"Folder" else fmt(f.length()),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)};IconButton(onClick={selected=f;action="menu"}){Icon(Icons.Default.MoreVert,null)}};HorizontalDivider()}}
+        Row(verticalAlignment=Alignment.CenterVertically){
+            IconButton(onClick={if(selected.isNotEmpty())selected=emptySet() else if(collection!=null)collection=null else current=current?.parentFile}){Icon(Icons.Default.ArrowBack,null)}
+            Text(if(selected.isNotEmpty())"${selected.size} selected" else collection?:current?.absolutePath?:internal.absolutePath,Modifier.weight(1f),maxLines=1,style=MaterialTheme.typography.bodySmall)
+            IconButton(onClick={selected=if(selected.size==files.size&&files.isNotEmpty())emptySet() else files.toSet()}){Icon(Icons.Default.SelectAll,if(arabic)"تحديد الكل" else "Select all")}
+            IconButton(onClick={searchOpen=!searchOpen;query=""}){Icon(Icons.Default.Search,if(arabic)"بحث" else "Search")}
+            IconButton(onClick=onRefresh){Icon(Icons.Default.Refresh,if(arabic)"تحديث" else "Refresh")}
+        }
+        if(searchOpen)OutlinedTextField(query,{query=it},modifier=Modifier.fillMaxWidth(),singleLine=true,placeholder={Text(if(arabic)"ابحث عن ملف" else "Search files")},trailingIcon={IconButton(onClick={query=""}){Icon(Icons.Default.Close,null)}})
+        Row(verticalAlignment=Alignment.CenterVertically){
+            if(collection==null)TextButton(onClick={folderDialog=true}){Icon(Icons.Default.CreateNewFolder,null);Text(if(arabic)"مجلد جديد" else "New Folder")}
+            Box{TextButton(onClick={sortMenu=true}){Icon(Icons.Default.Sort,null);Text(if(arabic)"ترتيب" else "Sort")}
+                DropdownMenu(sortMenu,{sortMenu=false}){
+                    listOf("az" to "A–Z","newest" to (if(arabic)"الأحدث" else "Newest"),"oldest" to (if(arabic)"الأقدم" else "Oldest"),"largest" to (if(arabic)"الأكبر حجمًا" else "Largest")).forEach{(v,label)->DropdownMenuItem(text={Text(label)},onClick={sort=v;sortMenu=false})}
+                }}
+            Spacer(Modifier.weight(1f));IconButton(onClick={grid=!grid}){Icon(if(grid)Icons.Default.ViewList else Icons.Default.GridView,if(grid)"List" else "Grid")}
+        }
+        if(selected.isNotEmpty())Row{
+            TextButton(onClick={pending="Copy";picker=true}){Icon(Icons.Default.ContentCopy,null);Text(if(arabic)"نسخ" else "Copy")}
+            TextButton(onClick={pending="Move";picker=true}){Icon(Icons.Default.DriveFileMove,null);Text(if(arabic)"نقل" else "Move")}
+            TextButton(onClick={pending="Delete"}){Icon(Icons.Default.Delete,null);Text(if(arabic)"حذف" else "Delete")}
+        }
+        if(files.isEmpty())Text(if(arabic)"لا توجد ملفات" else "No files found",Modifier.padding(20.dp))
+        else if(grid){
+            LazyVerticalGrid(GridCells.Adaptive(112.dp),modifier=Modifier.weight(1f),contentPadding=PaddingValues(bottom=110.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+                gridItems(files,key={it.absolutePath}){f->Card(Modifier.fillMaxWidth().combinedClickable(onClick={open(f)},onLongClick={if(selected.isEmpty())menuFile=f else toggle(f)})){
+                    Column(Modifier.padding(8.dp),horizontalAlignment=Alignment.CenterHorizontally){
+                        Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.TopEnd){Icon(fileIcon(f),null,Modifier.padding(top=10.dp).size(48.dp),tint=MaterialTheme.colorScheme.primary);Checkbox(f in selected,{toggle(f)},modifier=Modifier.size(28.dp))}
+                        Text(f.name,maxLines=2,minLines=2,style=MaterialTheme.typography.bodySmall)
+                        Text(if(f.isDirectory)"Folder" else fmt(f.length()),style=MaterialTheme.typography.labelSmall)
+                        TextButton(onClick={details=f},contentPadding=PaddingValues(0.dp)){Text(if(arabic)"التفاصيل" else "Details")}
+                    }
+                }}
+            }
+        }else{
+            LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(bottom=110.dp)){
+                items(files,key={it.absolutePath}){f->Row(Modifier.fillMaxWidth().combinedClickable(onClick={open(f)},onLongClick={if(selected.isEmpty())menuFile=f else toggle(f)}).padding(vertical=7.dp),verticalAlignment=Alignment.CenterVertically){
+                    Icon(fileIcon(f),null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(10.dp));Column(Modifier.weight(1f)){Text(f.name,maxLines=1);Text(if(f.isDirectory)"Folder" else fmt(f.length()),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+                    Checkbox(f in selected,{toggle(f)});IconButton(onClick={details=f}){Icon(Icons.Default.Info,if(arabic)"التفاصيل" else "Details")};IconButton(onClick={menuFile=f}){Icon(Icons.Default.MoreVert,null)}
+                };HorizontalDivider()}
+            }
+        }
     }
-    if(action=="menu"&&selected!=null){val f=selected!!;AlertDialog(onDismissRequest={action=null;selected=null},title={Text(f.name,maxLines=1)},text={Column{val opts=listOf("Open","Copy","Move","Delete","Share","Extract","Compress","Rename","Permanent delete");opts.forEach{opt->TextButton(onClick={if(opt=="Open"){action=null;selected=null;if(f.isDirectory)current=f else if(isMedia(f))playing=f else openFile(context,f)}else{action=opt;input=if(opt=="Rename")f.name else if(opt=="Copy"||opt=="Move")f.parentFile?.absolutePath?:"" else ""}} ,modifier=Modifier.fillMaxWidth()){Text(when(opt){"Open"->if(arabic)"فتح" else opt;"Copy"->if(arabic)"نسخ" else opt;"Move"->if(arabic)"نقل" else opt;"Delete"->if(arabic)"حذف" else opt;"Share"->if(arabic)"مشاركة" else opt;"Extract"->if(arabic)"فك الضغط / استخراج" else opt;"Compress"->if(arabic)"ضغط" else opt;"Rename"->if(arabic)"إعادة تسمية" else opt;else->if(arabic)"حذف نهائي" else opt})}}}},confirmButton={TextButton(onClick={action=null;selected=null}){Text(if(arabic)"إغلاق" else "Close")}})}
-    if(action in listOf("Copy","Move","Rename")&&selected!=null){AlertDialog(onDismissRequest={action=null},title={Text(action!!)},text={OutlinedTextField(input,{input=it},label={Text(if(action=="Rename")"New name" else "Destination folder path")},singleLine=true)},confirmButton={TextButton(onClick={perform(action!!,selected!!)} ){Text("OK")}},dismissButton={TextButton(onClick={action=null;selected=null}){Text("Cancel")}})}
-    if(action in listOf("Delete","حذف","Permanent delete","حذف نهائي","Compress","ضغط","Extract","استخراج","Share","مشاركة")&&selected!=null){val f=selected!!;AlertDialog(onDismissRequest={action=null;selected=null},title={Text(action!!)},text={Text(if(arabic)"هل تريد تنفيذ العملية على ${f.name}؟" else "Perform this action on ${f.name}?")},confirmButton={TextButton(onClick={perform(action!!,f)}){Text(if(arabic)"تنفيذ" else "Confirm")}},dismissButton={TextButton(onClick={action=null;selected=null}){Text(if(arabic)"إلغاء" else "Cancel")}})}
+    menuFile?.let{f->AlertDialog(onDismissRequest={menuFile=null},title={Text(f.name,maxLines=1)},text={Column{
+        listOf("Open","Copy","Move","Details","Rename","Delete","Share","Compress","Extract").forEach{op->TextButton(onClick={menuFile=null;when(op){
+            "Open"->open(f);"Copy","Move"->{selected=setOf(f);pending=op;picker=true};"Details"->details=f
+            "Rename"->{selected=setOf(f);pending="Rename"};"Delete"->{selected=setOf(f);pending="Delete"}
+            "Share"->runCatching{val u=FileProvider.getUriForFile(context,context.packageName+".provider",f);context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType(mime(f)).putExtra(Intent.EXTRA_STREAM,u).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),"Share"))}.onFailure{message=it.message}
+            "Compress"->runCatching{zipFolder(f,File(f.parentFile,f.nameWithoutExtension+".zip"));onRefresh()}.onFailure{message=it.message}
+            "Extract"->runCatching{unzip(f,File(f.parentFile,f.nameWithoutExtension));onRefresh()}.onFailure{message=it.message}
+        }},modifier=Modifier.fillMaxWidth()){Text(when(op){"Details"->if(arabic)"بيانات الملف" else op;"Rename"->if(arabic)"إعادة تسمية" else op;"Delete"->if(arabic)"حذف" else op;else->op})}}
+    }},confirmButton={TextButton(onClick={menuFile=null}){Text("Close")}})}
+    if(pending=="Rename"&&selected.size==1){
+        var newName by remember(selected){mutableStateOf(selected.first().name)}
+        AlertDialog(onDismissRequest={pending=null;selected=emptySet()},title={Text(if(arabic)"إعادة تسمية" else "Rename")},text={OutlinedTextField(newName,{newName=it},singleLine=true)},confirmButton={TextButton(onClick={val f=selected.first();val ok=newName.isNotBlank()&&f.renameTo(File(f.parentFile,newName.trim()));pending=null;selected=emptySet();onRefresh();if(!ok)message="Rename failed"}){Text(if(arabic)"حفظ" else "Save")}},dismissButton={TextButton(onClick={pending=null;selected=emptySet()}){Text("Cancel")}})
+    }
+    if(pending=="Delete"&&selected.isNotEmpty())AlertDialog(onDismissRequest={pending=null;selected=emptySet()},title={Text(if(arabic)"حذف العناصر" else "Delete items")},text={Text(if(arabic)"نقل ${selected.size} عنصر إلى سلة المحذوفات؟" else "Move ${selected.size} item(s) to Trash?")},confirmButton={TextButton(onClick={val errors=selected.toList().mapNotNull{f->runCatching{moveToTrash(context,f)}.exceptionOrNull()?.message};pending=null;selected=emptySet();onRefresh();if(errors.isNotEmpty())message=errors.joinToString("\n")}){Text(if(arabic)"تأكيد" else "Confirm")}},dismissButton={TextButton(onClick={pending=null;selected=emptySet()}){Text("Cancel")}})
+    if(folderDialog)AlertDialog(onDismissRequest={folderDialog=false},title={Text(if(arabic)"مجلد جديد" else "New Folder")},text={OutlinedTextField(folderName,{folderName=it},singleLine=true,placeholder={Text(if(arabic)"اسم المجلد" else "Folder name")})},confirmButton={TextButton(onClick={create}){Text(if(arabic)"إنشاء" else "Create")}},dismissButton={TextButton(onClick={folderDialog=false}){Text("Cancel")}})
+    if(picker)DestinationPickerDialog(arabic,internal,external,{picker=false;pending=null;selected=emptySet()},{finishCopyMove(it)})
+    details?.let{f->val date=SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.getDefault()).format(Date(f.lastModified()))
+        AlertDialog(onDismissRequest={details=null},title={Text(if(arabic)"بيانات الملف" else "File details")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+            DetailLine(if(arabic)"الاسم" else "Name",f.name);DetailLine(if(arabic)"الامتداد" else "Extension",if(f.isDirectory)"Folder" else f.extension);DetailLine(if(arabic)"الحجم" else "Size",if(f.isDirectory)"—" else fmt(f.length()));DetailLine(if(arabic)"تاريخ التعديل" else "Modified",date);DetailLine(if(arabic)"المسار" else "Path",f.absolutePath)
+        }},confirmButton={TextButton(onClick={details=null}){Text("Close")}})
+    }
     playing?.let{PlayerDialog(it){playing=null}}
     message?.let{AlertDialog(onDismissRequest={message=null},text={Text(it)},confirmButton={TextButton(onClick={message=null}){Text("OK")}})}
 }
+@Composable private fun DetailLine(label:String,value:String){Column{Text(label,style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary);Text(value,style=MaterialTheme.typography.bodyMedium)}}
+private fun fileIcon(f:File)=when{f.isDirectory->Icons.Default.Folder;isVideo(f)->Icons.Default.VideoFile;isAudio(f)->Icons.Default.AudioFile;f.extension.lowercase() in setOf("jpg","jpeg","png","gif","webp","bmp","heic")->Icons.Default.Image;else->Icons.Default.InsertDriveFile}
 
+@Composable private fun DestinationPickerDialog(arabic:Boolean,internal:File,external:File?,onDismiss:()->Unit,onChoose:(File)->Unit){
+    var current by remember{mutableStateOf<File?>(null)}
+    val roots=remember(internal,external){listOf(File("/"),internal)+listOfNotNull(external).distinctBy{it.absolutePath}}
+    val dirs=remember(current){current?.let{runCatching{it.listFiles()?.filter{f->f.isDirectory&&f.canRead()}?.sortedBy{f->f.name.lowercase(Locale.ROOT)}.orEmpty()}.getOrDefault(emptyList())}.orEmpty()}
+    Dialog(onDismissRequest=onDismiss,properties=DialogProperties(usePlatformDefaultWidth=false)){
+        Surface(Modifier.fillMaxWidth(.94f).heightIn(max=660.dp),shape=RoundedCornerShape(24.dp)){
+            Column(Modifier.padding(16.dp)){
+                Text(if(arabic)"اختيار مكان النسخ أو النقل" else "Choose destination",style=MaterialTheme.typography.titleLarge)
+                Row(verticalAlignment=Alignment.CenterVertically){
+                    IconButton(onClick={current=current?.parentFile}){Icon(Icons.Default.ArrowBack,null)}
+                    Text(current?.absolutePath?:if(arabic)"اختر وحدة التخزين" else "Choose storage",Modifier.weight(1f),maxLines=1)
+                    if(current!=null)TextButton(onClick={onChoose(current!!)){Text(if(arabic)"اختر هذا المجلد" else "Use folder")}
+                }
+                HorizontalDivider()
+                LazyColumn(Modifier.weight(1f,false)){
+                    if(current==null)items(roots){root->Row(Modifier.fillMaxWidth().combinedClickable(onClick={current=root}).padding(12.dp),verticalAlignment=Alignment.CenterVertically){Icon(if(root.absolutePath=="/")Icons.Default.AdminPanelSettings else if(root==internal)Icons.Default.PhoneAndroid else Icons.Default.SdCard,null);Spacer(Modifier.width(12.dp));Column{Text(if(root.absolutePath=="/")"Root" else if(root==internal)"Internal Storage" else "External Storage");Text(root.absolutePath,style=MaterialTheme.typography.bodySmall)}}}
+                    else items(dirs){dir->Row(Modifier.fillMaxWidth().combinedClickable(onClick={current=dir}).padding(12.dp),verticalAlignment=Alignment.CenterVertically){Icon(Icons.Default.Folder,null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(12.dp));Text(dir.name)}}
+                }
+                TextButton(onClick=onDismiss,modifier=Modifier.align(Alignment.End)){Text(if(arabic)"إلغاء" else "Cancel")}
+            }
+        }
+    }
+}
 
 private fun trashPrefs(context:Context)=context.getSharedPreferences("google_file_plus_trash",Context.MODE_PRIVATE)
 private fun trashDir(context:Context)=File(context.filesDir,"trash").apply{mkdirs()}
@@ -200,12 +327,19 @@ class TrashCleanupWorker(context:Context,params:WorkerParameters):CoroutineWorke
 }
 
 
-private fun isMedia(f:File)=f.extension.lowercase() in setOf("mp4","mkv","webm","mov","avi","mp3","m4a","aac","flac","ogg","wav")
+private val VIDEO_EXTENSIONS=setOf("mp4","mkv","webm","mov","avi","m4v","3gp","mpeg","mpg","ts","wmv","flv","ogv")
+private val AUDIO_EXTENSIONS=setOf("mp3","m4a","aac","flac","ogg","wav","wma","opus","amr","aiff","aif","mid","midi","ape")
+private fun isVideo(f:File)=f.extension.lowercase(Locale.ROOT) in VIDEO_EXTENSIONS
+private fun isAudio(f:File)=f.extension.lowercase(Locale.ROOT) in AUDIO_EXTENSIONS
+private fun isMedia(f:File)=isVideo(f)||isAudio(f)
 private fun queryMediaFiles(context:Context,kind:String):List<File>{
-    if(kind=="downloads")return File(Environment.getExternalStorageDirectory(),Environment.DIRECTORY_DOWNLOADS).listFiles()?.toList().orEmpty().sortedByDescending{it.lastModified()}
-    val uris=when(kind){ "videos"->listOf(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,MediaStore.Audio.Media.EXTERNAL_CONTENT_URI); "images"->listOf(MediaStore.Images.Media.EXTERNAL_CONTENT_URI);else->emptyList() }
+    if(kind=="downloads")return File(Environment.getExternalStorageDirectory(),Environment.DIRECTORY_DOWNLOADS).listFiles()?.toList().orEmpty()
+    val uri=when(kind){"videos"->MediaStore.Video.Media.EXTERNAL_CONTENT_URI;"audio"->MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;"images"->MediaStore.Images.Media.EXTERNAL_CONTENT_URI;else->return emptyList()}
     val result=mutableListOf<File>()
-    uris.forEach{uri->runCatching{context.contentResolver.query(uri,arrayOf(MediaStore.MediaColumns.DATA),null,null,MediaStore.MediaColumns.DATE_ADDED+" DESC")?.use{c->val idx=c.getColumnIndex(MediaStore.MediaColumns.DATA);while(c.moveToNext()){val path=c.getString(idx);if(!path.isNullOrBlank()){val f=File(path);if(f.exists())result.add(f)}}}}}
+    runCatching{context.contentResolver.query(uri,arrayOf(MediaStore.MediaColumns.DATA),null,null,MediaStore.MediaColumns.DATE_ADDED+" DESC")?.use{cursor->
+        val index=cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
+        if(index>=0)while(cursor.moveToNext()){val path=cursor.getString(index);if(!path.isNullOrBlank()){val f=File(path);if(f.exists())result.add(f)}}
+    }}
     return result.distinctBy{it.absolutePath}
 }
 @Composable private fun PlayerDialog(file:File,onClose:()->Unit){
