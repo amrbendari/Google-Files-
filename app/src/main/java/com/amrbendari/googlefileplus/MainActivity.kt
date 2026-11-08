@@ -35,6 +35,12 @@ import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import android.provider.MediaStore
+import androidx.work.CoroutineWorker
+import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.ExistingPeriodicWorkPolicy
+import java.util.concurrent.TimeUnit
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -53,7 +59,7 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); setContent { GoogleFilePlusApp() } }
+    override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); scheduleTrashCleanup(this); setContent { GoogleFilePlusApp() } }
 }
 private enum class Destination { HOME, BROWSE, SPACE, TRASH, SETTINGS }
 private enum class NavigationStyle { FLOATING, STANDARD }
@@ -171,6 +177,15 @@ private fun cleanupTrash(context:Context){
         if(now-time>=90L*24*60*60*1000){File(trashDir(context),parts.getOrNull(2)?: "").deleteRecursively();edit.remove(id)}
     };edit.apply()
 }
+
+private fun scheduleTrashCleanup(context:Context){
+    val request=PeriodicWorkRequestBuilder<TrashCleanupWorker>(1,TimeUnit.DAYS).build()
+    WorkManager.getInstance(context).enqueueUniquePeriodicWork("google_file_plus_trash_cleanup",ExistingPeriodicWorkPolicy.KEEP,request)
+}
+class TrashCleanupWorker(context:Context,params:WorkerParameters):CoroutineWorker(context,params){
+    override suspend fun doWork():Result { cleanupTrash(applicationContext); return Result.success() }
+}
+
 @Composable private fun TrashScreen(context:Context,refresh:Int,onRefresh:()->Unit,arabic:Boolean){
     val prefs=trashPrefs(context);val entries=remember(refresh){prefs.all.mapNotNull{(id,v)->val p=(v as? String)?.split("|",limit=3)?:return@mapNotNull null;if(p.size<3)null else Triple(id,p[0],File(trashDir(context),p[2]))}}
     Column(Modifier.fillMaxSize().padding(bottom=100.dp)){
