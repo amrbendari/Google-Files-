@@ -13,6 +13,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.rotate
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.verticalScroll
@@ -70,6 +74,7 @@ import java.util.zip.ZipOutputStream
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); scheduleTrashCleanup(this); setContent { GoogleFilePlusApp() } }
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) { super.onConfigurationChanged(newConfig) }
 }
 private enum class Destination { HOME, BROWSE, TRASH, SETTINGS }
 private enum class NavigationStyle { FLOATING, STANDARD }
@@ -81,7 +86,8 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
     val prefs = remember { context.getSharedPreferences("google_file_plus_settings", Context.MODE_PRIVATE) }
     var destination by remember { mutableStateOf(Destination.HOME) }
     val backStack = remember { mutableStateListOf<Destination>() }
-    var navStyle by remember { mutableStateOf(enumPref(prefs.getString("navigation_style","FLOATING"), NavigationStyle.FLOATING)) }
+    var navStyle by remember { mutableStateOf(NavigationStyle.STANDARD) }
+    var showIntro by remember { mutableStateOf(true) }
     var theme by remember { mutableStateOf(enumPref(prefs.getString("theme_choice","SYSTEM"), ThemeChoice.SYSTEM)) }
     var language by remember { mutableStateOf(enumPref(prefs.getString("app_language","SYSTEM"), AppLanguage.SYSTEM)) }
     var alpha by remember { mutableFloatStateOf(prefs.getFloat("glass_alpha",.78f)) }
@@ -98,7 +104,7 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
         if (destination != Destination.HOME) { destination=if(backStack.isNotEmpty()) backStack.removeAt(backStack.lastIndex) else Destination.HOME }
         else { val now=System.currentTimeMillis(); if(now-lastBack<1800L) (context as? ComponentActivity)?.finish() else { lastBack=now; android.widget.Toast.makeText(context,if(arabic) "اضغط رجوع مرة أخرى للخروج" else "Press back again to exit",android.widget.Toast.LENGTH_SHORT).show() } }
     }
-    LaunchedEffect(Unit) { cleanupTrash(context) }
+    LaunchedEffect(Unit) { cleanupTrash(context); delay(1050); showIntro=false }
     val access = remember(refresh) { if(Build.VERSION.SDK_INT>=30) Environment.isExternalStorageManager() else ContextCompat.checkSelfPermission(context,Manifest.permission.READ_EXTERNAL_STORAGE)==PackageManager.PERMISSION_GRANTED }
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()){refresh++}
     val settings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()){refresh++}
@@ -115,10 +121,28 @@ private enum class AppLanguage { SYSTEM, ENGLISH, ARABIC }
                     Destination.SETTINGS->SettingsScreen(navStyle,{navStyle=it;prefs.edit().putString("navigation_style",it.name).apply()},theme,{theme=it;prefs.edit().putString("theme_choice",it.name).apply()},language,{language=it;prefs.edit().putString("app_language",it.name).apply()},alpha,{alpha=it;prefs.edit().putFloat("glass_alpha",it).apply()},spacing,{spacing=it;prefs.edit().putFloat("nav_spacing",it).apply()},navBlur,{navBlur=it;prefs.edit().putFloat("nav_blur",it).apply()},navWidth,{navWidth=it;prefs.edit().putFloat("nav_width",it).apply()},arabic)
                 }
             }
-            AppNavigationBar(destination,{if(it==Destination.HOME)backStack.clear() else if(destination!=it)backStack.add(destination);destination=it},navStyle==NavigationStyle.FLOATING,alpha,spacing,navBlur,navWidth,Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),arabic)
+            AppNavigationBar(destination,{if(it==Destination.HOME)backStack.clear() else if(destination!=it)backStack.add(destination);destination=it},false,1f,spacing,0f,100f,Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),arabic)
+            if(showIntro) GoogleFilePlusIntro()
         }}}
     }
 }
+
+@Composable private fun GoogleFilePlusIntro(){
+    val transition= rememberInfiniteTransition(label="google_file_plus_intro")
+    val rotation by transition.animateFloat(initialValue=0f,targetValue=360f,animationSpec=infiniteRepeatable(animation=tween(1400,easing=LinearEasing)),label="logo_rotation")
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),contentAlignment=Alignment.Center){
+        Column(horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(12.dp)){
+            Box(Modifier.size(112.dp),contentAlignment=Alignment.Center){
+                Text("G",modifier=Modifier.rotate(rotation),fontSize=76.sp,fontWeight=FontWeight.Bold,color=Color(0xFF4285F4))
+                Row(Modifier.align(Alignment.BottomCenter),horizontalArrangement=Arrangement.spacedBy(7.dp)){
+                    listOf(Color(0xFF4285F4),Color(0xFFEA4335),Color(0xFFFBBC05),Color(0xFF34A853)).forEach{c->Surface(Modifier.size(10.dp),shape=RoundedCornerShape(50),color=c) {}}
+                }
+            }
+            Text("Google File+",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
+        }
+    }
+}
+
 private inline fun <reified T:Enum<T>> enumPref(v:String?,fallback:T):T=runCatching{enumValueOf<T>(v?:fallback.name)}.getOrDefault(fallback)
 private fun destLabel(d:Destination,a:Boolean)=when(d){Destination.HOME->if(a)"الرئيسية" else "Home";Destination.BROWSE->if(a)"استعراض" else "Browse";Destination.TRASH->if(a)"المحذوفات" else "Trash";Destination.SETTINGS->if(a)"الإعدادات" else "Settings"}
 private fun fmt(n:Long)=when{n<1024->"$n B";n<1048576->"${n/1024} KB";else->String.format(Locale.getDefault(),"%.1f MB",n/1048576f)}
@@ -224,7 +248,7 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
         }
         if(files.isEmpty())Text(if(arabic)"لا توجد ملفات" else "No files found",Modifier.padding(20.dp))
         else if(grid){
-            LazyVerticalGrid(GridCells.Adaptive(112.dp),modifier=Modifier.fillMaxWidth().heightIn(max=560.dp),contentPadding=PaddingValues(bottom=110.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
+            LazyVerticalGrid(GridCells.Adaptive(112.dp),modifier=Modifier.fillMaxWidth(),contentPadding=PaddingValues(bottom=110.dp),horizontalArrangement=Arrangement.spacedBy(8.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){
                 gridItems(files,key={it.absolutePath}){f->Card(Modifier.fillMaxWidth().combinedClickable(onClick={open(f)},onLongClick={if(selected.isEmpty())menuFile=f else toggle(f)})){
                     Column(Modifier.padding(8.dp),horizontalAlignment=Alignment.CenterHorizontally){
                         Box(Modifier.fillMaxWidth(),contentAlignment=Alignment.TopEnd){Icon(fileIcon(f),null,Modifier.padding(top=10.dp).size(48.dp),tint=MaterialTheme.colorScheme.primary);Checkbox(f in selected,{toggle(f)},modifier=Modifier.size(28.dp))}
@@ -235,7 +259,7 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
                 }}
             }
         }else{
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max=560.dp),contentPadding=PaddingValues(bottom=110.dp)){
+            LazyColumn(Modifier.fillMaxWidth(),contentPadding=PaddingValues(bottom=110.dp)){
                 items(files,key={it.absolutePath}){f->Row(Modifier.fillMaxWidth().combinedClickable(onClick={open(f)},onLongClick={if(selected.isEmpty())menuFile=f else toggle(f)}).padding(vertical=7.dp),verticalAlignment=Alignment.CenterVertically){
                     Icon(fileIcon(f),null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(10.dp));Column(Modifier.weight(1f)){Text(f.name,maxLines=1);Text(if(f.isDirectory)"Folder" else fmt(f.length()),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
                     Checkbox(f in selected,{toggle(f)});IconButton(onClick={details=f}){Icon(Icons.Default.Info,if(arabic)"التفاصيل" else "Details")};IconButton(onClick={menuFile=f}){Icon(Icons.Default.MoreVert,null)}
