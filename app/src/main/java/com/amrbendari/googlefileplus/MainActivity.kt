@@ -28,6 +28,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.blur
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import android.provider.MediaStore
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -109,12 +116,14 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
 @Composable private fun FileBrowser(context:Context,access:Boolean,request:()->Unit,refresh:Int,onRefresh:()->Unit,arabic:Boolean,home:Boolean){
     val external=remember{context.getExternalFilesDirs(null).getOrNull(1)?.let{var f:File?=it;repeat(4){f=f?.parentFile};f}?.takeIf{it.exists()}}
     var current by remember{mutableStateOf<File?>(null)}
+    var collection by remember{mutableStateOf<String?>(null)}
+    var playing by remember{mutableStateOf<File?>(null)}
     var selected by remember{mutableStateOf<File?>(null)}
     var action by remember{mutableStateOf<String?>(null)}
     var input by remember{mutableStateOf("")}
     var message by remember{mutableStateOf<String?>(null)}
     val space=remember{File(context.filesDir,"space").apply{mkdirs()}}
-    val rootList=remember(refresh,current,access,home){if(access){val base=current; if(base!=null)runCatching{base.listFiles()?.toList().orEmpty().sortedWith(compareBy<File>{!it.isDirectory}.thenBy{it.name.lowercase()})}.getOrDefault(emptyList()) else emptyList()}else emptyList()}
+    val rootList=remember(refresh,current,access,home,collection){if(access){if(collection!=null)queryMediaFiles(context,collection!!).sortedBy{it.name.lowercase()} else {val base=current; if(base!=null)runCatching{base.listFiles()?.toList().orEmpty().sortedWith(compareBy<File>{!it.isDirectory}.thenBy{it.name.lowercase()})}.getOrDefault(emptyList()) else emptyList()}}else emptyList()}
     fun done(){selected=null;action=null;input="";onRefresh()}
     fun perform(a:String,f:File){
         try{when(a){
@@ -129,16 +138,17 @@ private fun mime(f:File)=when(f.extension.lowercase()){ "pdf"->"application/pdf"
         }}catch(e:Exception){message=e.message?: "Operation failed"};done()
     }
     if(!access){Column(horizontalAlignment=Alignment.CenterHorizontally,modifier=Modifier.fillMaxWidth().padding(24.dp)){Icon(Icons.Default.FolderOpen,null,Modifier.size(54.dp));Text(if(arabic)"اسمح بالوصول إلى كل الملفات" else "Allow access to all files");Button(onClick=request){Text(if(arabic)"منح الصلاحية" else "Grant access")}}}
-    else if(home&&current==null){
+    else if(home&&current==null&&collection==null){
         val cards=listOf(Triple("Root","/",Icons.Default.AdminPanelSettings),Triple(if(arabic)"Internal Storage" else "Internal Storage",Environment.getExternalStorageDirectory().absolutePath,Icons.Default.PhoneAndroid),Triple(if(arabic)"External Storage" else "External Storage",external?.absolutePath?: "Not available",Icons.Default.SdCard))
-        LazyColumn(verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(bottom=110.dp)){items(cards){(name,path,ic)->Card(Modifier.fillMaxWidth().combinedClickable(onClick={if(path=="Not available")message=if(arabic)"لا توجد بطاقة خارجية" else "No external SD card detected" else current=File(path)},onLongClick={message=path})){Row(Modifier.padding(18.dp),verticalAlignment=Alignment.CenterVertically){Icon(ic,null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(16.dp));Column{Text(name,fontWeight=FontWeight.SemiBold);Text(path,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}}}}}
+        LazyColumn(verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(bottom=110.dp)){item{Card(Modifier.fillMaxWidth()){Column(Modifier.padding(14.dp)){Text(if(arabic)"مكتبتك" else "Your library",fontWeight=FontWeight.Bold);Spacer(Modifier.height(8.dp));Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf(Triple("videos",Icons.Default.VideoLibrary,if(arabic)"ملفات فيديو" else "Videos"),Triple("images",Icons.Default.PhotoLibrary,if(arabic)"الصور" else "Images"),Triple("downloads",Icons.Default.Download,if(arabic)"تحميلات" else "Downloads")).forEach{(key,ic,label)->Column(Modifier.weight(1f).combinedClickable(onClick={collection=key},onLongClick={}).padding(8.dp),horizontalAlignment=Alignment.CenterHorizontally){Icon(ic,null,tint=MaterialTheme.colorScheme.primary,modifier=Modifier.size(28.dp));Text(label,style=MaterialTheme.typography.labelMedium)}}}}}};items(cards){(name,path,ic)->Card(Modifier.fillMaxWidth().combinedClickable(onClick={if(path=="Not available")message=if(arabic)"لا توجد بطاقة خارجية" else "No external SD card detected" else current=File(path)},onLongClick={message=path})){Row(Modifier.padding(18.dp),verticalAlignment=Alignment.CenterVertically){Icon(ic,null,tint=MaterialTheme.colorScheme.primary);Spacer(Modifier.width(16.dp));Column{Text(name,fontWeight=FontWeight.SemiBold);Text(path,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}}}}}
     }else{
-        Row(verticalAlignment=Alignment.CenterVertically){IconButton(onClick={current=current?.parentFile}){Icon(Icons.Default.ArrowBack,null)};Text(current?.absolutePath?:Environment.getExternalStorageDirectory().absolutePath,Modifier.weight(1f),maxLines=1);IconButton(onClick=onRefresh){Icon(Icons.Default.Refresh,null)}}
-        LazyColumn(contentPadding=PaddingValues(bottom=110.dp)){items(rootList,key={it.absolutePath}){f->Row(Modifier.fillMaxWidth().combinedClickable(onClick={if(f.isDirectory)current=f else if(f.extension.equals("zip",true)){selected=f;action="Extract"}else openFile(context,f)},onLongClick={selected=f;action="menu"}).padding(vertical=10.dp),verticalAlignment=Alignment.CenterVertically){Icon(if(f.isDirectory)Icons.Default.Folder else Icons.Default.InsertDriveFile,null,tint=if(f.isDirectory)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant);Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text(f.name,maxLines=1);Text(if(f.isDirectory)"Folder" else fmt(f.length()),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)};IconButton(onClick={selected=f;action="menu"}){Icon(Icons.Default.MoreVert,null)}};HorizontalDivider()}}
+        Row(verticalAlignment=Alignment.CenterVertically){IconButton(onClick={if(collection!=null)collection=null else current=current?.parentFile}){Icon(Icons.Default.ArrowBack,null)};Text(current?.absolutePath?:Environment.getExternalStorageDirectory().absolutePath,Modifier.weight(1f),maxLines=1);IconButton(onClick=onRefresh){Icon(Icons.Default.Refresh,null)}}
+        LazyColumn(contentPadding=PaddingValues(bottom=110.dp)){items(rootList,key={it.absolutePath}){f->Row(Modifier.fillMaxWidth().combinedClickable(onClick={if(f.isDirectory)current=f else if(f.extension.equals("zip",true)){selected=f;action="Extract"}else if(isMedia(f))playing=f else openFile(context,f)},onLongClick={selected=f;action="menu"}).padding(vertical=10.dp),verticalAlignment=Alignment.CenterVertically){Icon(if(f.isDirectory)Icons.Default.Folder else Icons.Default.InsertDriveFile,null,tint=if(f.isDirectory)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant);Spacer(Modifier.width(12.dp));Column(Modifier.weight(1f)){Text(f.name,maxLines=1);Text(if(f.isDirectory)"Folder" else fmt(f.length()),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)};IconButton(onClick={selected=f;action="menu"}){Icon(Icons.Default.MoreVert,null)}};HorizontalDivider()}}
     }
     if(action=="menu"&&selected!=null){val f=selected!!;AlertDialog(onDismissRequest={action=null;selected=null},title={Text(f.name,maxLines=1)},text={Column{val opts=listOf("Open","Copy","Move","Delete","Share","Extract","Compress","Rename","Move to Space","Permanent delete");opts.forEach{opt->TextButton(onClick={if(opt=="Open"){action=null;selected=null;if(f.isDirectory)current=f else openFile(context,f)}else{action=opt;input=if(opt=="Rename")f.name else if(opt=="Copy"||opt=="Move")f.parentFile?.absolutePath?:"" else ""}} ,modifier=Modifier.fillMaxWidth()){Text(when(opt){"Open"->if(arabic)"فتح" else opt;"Copy"->if(arabic)"نسخ" else opt;"Move"->if(arabic)"نقل" else opt;"Delete"->if(arabic)"حذف" else opt;"Share"->if(arabic)"مشاركة" else opt;"Extract"->if(arabic)"فك الضغط / استخراج" else opt;"Compress"->if(arabic)"ضغط" else opt;"Rename"->if(arabic)"إعادة تسمية" else opt;"Move to Space"->if(arabic)"نقل إلى Space" else opt;else->if(arabic)"حذف نهائي" else opt})}}}},confirmButton={TextButton(onClick={action=null;selected=null}){Text(if(arabic)"إغلاق" else "Close")}})}
     if(action in listOf("Copy","Move","Rename")&&selected!=null){AlertDialog(onDismissRequest={action=null},title={Text(action!!)},text={OutlinedTextField(input,{input=it},label={Text(if(action=="Rename")"New name" else "Destination folder path")},singleLine=true)},confirmButton={TextButton(onClick={perform(action!!,selected!!)} ){Text("OK")}},dismissButton={TextButton(onClick={action=null;selected=null}){Text("Cancel")}})}
     if(action in listOf("Delete","حذف","Permanent delete","حذف نهائي","Compress","ضغط","Extract","استخراج","Move to Space","نقل إلى Space","Share","مشاركة")&&selected!=null){val f=selected!!;AlertDialog(onDismissRequest={action=null;selected=null},title={Text(action!!)},text={Text(if(arabic)"هل تريد تنفيذ العملية على ${f.name}؟" else "Perform this action on ${f.name}?")},confirmButton={TextButton(onClick={perform(action!!,f)}){Text(if(arabic)"تنفيذ" else "Confirm")}},dismissButton={TextButton(onClick={action=null;selected=null}){Text(if(arabic)"إلغاء" else "Cancel")}})}
+    playing?.let{PlayerDialog(it){playing=null}}
     message?.let{AlertDialog(onDismissRequest={message=null},text={Text(it)},confirmButton={TextButton(onClick={message=null}){Text("OK")}})}
 }
 
@@ -171,6 +181,26 @@ private fun cleanupTrash(context:Context){
                 IconButton(onClick={file.deleteRecursively();prefs.edit().remove(id).apply();onRefresh()}){Icon(Icons.Default.DeleteForever,null)}
             };HorizontalDivider()
         }}
+    }
+}
+
+
+private fun isMedia(f:File)=f.extension.lowercase() in setOf("mp4","mkv","webm","mov","avi","mp3","m4a","aac","flac","ogg","wav")
+private fun queryMediaFiles(context:Context,kind:String):List<File>{
+    if(kind=="downloads")return File(Environment.getExternalStorageDirectory(),Environment.DIRECTORY_DOWNLOADS).listFiles()?.toList().orEmpty().sortedByDescending{it.lastModified()}
+    val uris=when(kind){ "videos"->listOf(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,MediaStore.Audio.Media.EXTERNAL_CONTENT_URI); "images"->listOf(MediaStore.Images.Media.EXTERNAL_CONTENT_URI);else->emptyList() }
+    val result=mutableListOf<File>()
+    uris.forEach{uri->runCatching{context.contentResolver.query(uri,arrayOf(MediaStore.MediaColumns.DATA),null,null,MediaStore.MediaColumns.DATE_ADDED+" DESC")?.use{c->val idx=c.getColumnIndex(MediaStore.MediaColumns.DATA);while(c.moveToNext()){val path=c.getString(idx);if(!path.isNullOrBlank()){val f=File(path);if(f.exists())result.add(f)}}}}}
+    return result.distinctBy{it.absolutePath}
+}
+@Composable private fun PlayerDialog(file:File,onClose:()->Unit){
+    val context= LocalContext.current
+    val player= remember(file){ExoPlayer.Builder(context).build().apply{setMediaItem(MediaItem.fromUri(Uri.fromFile(file)));prepare();playWhenReady=true}}
+    DisposableEffect(player){onDispose{player.release()}}
+    Dialog(onDismissRequest=onClose,properties=DialogProperties(usePlatformDefaultWidth=false)){
+        Surface(Modifier.fillMaxWidth(.94f).heightIn(min=260.dp,max=560.dp),shape=RoundedCornerShape(20.dp),color=Color.Black){
+            Column { Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically){Text(file.name,Modifier.weight(1f),color=Color.White,maxLines=1);IconButton(onClick=onClose){Icon(Icons.Default.Close,null,tint=Color.White)}};AndroidView(factory={ctx->PlayerView(ctx).apply{this.player=player;useController=true;controllerAutoShow=true}},modifier=Modifier.fillMaxWidth().weight(1f)) }
+        }
     }
 }
 
